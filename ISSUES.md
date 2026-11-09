@@ -29,6 +29,20 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | Build report | OCTADE, `news.software.nntp` 815 (2026-10-06) | does not build on Debian; Docker and Podman builds fail on package conflicts (O-07) |
 | NewsCache interop | NewsCache 1.3.23 with OUS as upstream, 203 commands direct vs through the cache, twice; 3 posts | reads, error codes and COMPRESS fallback match; posted bodies byte-exact; three findings (O-10 to O-12) |
 | usenet_archiver real-server test | 16 tricky articles each by POST and IHAVE, pulled back 4 times with the archiver (run r20261109T150600-188e36) | 30 of 32 accepted; archiver side exact; two new findings (O-15, O-16), O-13 on POST, O-05 and O-12 seen again |
+| INN interop | INN 2.8.0 prerelease (upstream `main` 4c5218607): innfeed -> OUS, OUS -> innd (streaming), 5 posts each way compared article by article; nntp-testkit against INN (`innd` and `nnrpd`) | both directions work, nothing loops; INN keeps heads byte-exact and writes Xref, OUS does not (O-05, O-10); no new findings |
+
+## Conformance side by side
+
+nntp-testkit v0.11.2, all 41 checks, run blind (no skips) on 2026-11-09. "n/a" means the check does
+not apply to that port (a reader port without IHAVE/streaming, or a transit-only port that
+answers reader commands with 480).
+
+| Server | Reader checks (25) | AUTHINFO (6) | IHAVE + streaming (10) |
+|---|---|---|---|
+| OUS 0.8.0 (one port) | 25 pass | 2 pass, 4 fail (O-01 to O-04) | 10 pass |
+| INN 2.8.0 pre, `nnrpd` (reader port, login) | 25 pass | 6 pass | 1 pass, 9 n/a (not advertised) |
+| INN 2.8.0 pre, `innd` (transit port) | 8 general pass; 17 n/a (480 for reader commands) | n/a (no login given) | 10 pass |
+| Diablo `main` (reported by diablo-cc-1, not run here) | pass except `mode-reader` (480 before login, by design) | 6 pass (D-46, diablo-nntp #67) | pass (D-48, #67) |
 
 ## Overview
 
