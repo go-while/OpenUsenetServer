@@ -3,7 +3,10 @@
 Findings about OpenUsenetServer 0.8.0 since 2026-11-09. They come from the first blind test
 runs against an unmodified server (`config.example.yml`, PostgreSQL 16, test VM), by other
 projects' tools, and from reading the code those runs pointed at.
-[REVIEW.md](REVIEW.md) tracks how much of the code has been reviewed.
+[REVIEW.md](REVIEW.md) tracks how much of the code has been reviewed. Both files are kept up to
+date on branch `dev-gw` of the test fork
+[go-while/OpenUsenetServer](https://github.com/go-while/OpenUsenetServer/tree/dev-gw), where the
+tests below live.
 
 Security problems do not go here: report them privately as described in
 [SECURITY.md](SECURITY.md).
@@ -19,7 +22,7 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 
 | Run | Tool | Result |
 |---|---|---|
-| Conformance, in-process | `e2e/conformance_test.go` (`make e2e`), nntp-testkit v0.11.2, memory store | 30 pass, 4 fail, 7 skip (empty group) |
+| Conformance, in-process | `e2e/conformance_test.go` (`make e2e`; on the fork's `dev-gw`, not in `main` yet), nntp-testkit v0.11.2, memory store | 30 pass, 4 fail, 7 skip (empty group) |
 | Conformance, live | `nntp-conformance` v0.11.2 against `openusenet serve` with PostgreSQL | 1st pass 30/4/7, 2nd pass 37 pass, 4 fail, 0 skip |
 | pynntp integration tests | pynntp `main` + portable tests (greenbender/pynntp#144), anonymous | 4 pass, 22 fail, 8 skip; one server-side failure (O-01), the rest pynntp or test assumptions |
 | Diablo feed interop | Diablo `dnewslink`, 5 articles per mode, then resent | streaming and IHAVE work; duplicates get 438/435; one finding (O-05) |
@@ -38,7 +41,7 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | open |
 | [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Medium | Build fails on Debian, Docker and Podman builds fail on package conflicts | open (reported) |
 | [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | decision |
-| [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed (dev-gw: `e2e/` is its own module) |
+| [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed on the fork (`e2e/` is its own module) |
 | [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open |
 | [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open |
 | [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | open |
@@ -73,7 +76,7 @@ RFC 4643 section 2.2: after a successful login the server must not advertise AUT
 more. `cmdCapabilities` returns a fixed list that always contains `AUTHINFO USER`
 (`internal/nntp/session.go:150-170`). Verified. Found by nntp-testkit
 (`authinfo-capabilities`). Diablo fixed O-01 to O-04 together (its D-46, diablo-nntp #67) and
-pins them with the six RFC 4643 checks of nntp-testkit; `e2e/conformance_test.go` can do the
+pins them with the six RFC 4643 checks of nntp-testkit; the fork's `e2e/conformance_test.go` can do the
 same once they are fixed.
 
 ### O-05 The article head is rebuilt, not kept
@@ -124,7 +127,7 @@ configured; a startup warning when `pathhost` (or `hostname`) is still the examp
 help. Decision for the maintainer.
 
 ### O-09 Test dependency raises the Go version
-The e2e conformance test (`e2e/`, branch `e2e`) imports nntp-testkit, which needs Go 1.26, so
+The e2e conformance test (`e2e/` on the fork's branch `dev-gw`) imports nntp-testkit, which needs Go 1.26, so
 `go mod tidy` raises the `go` line of the main module from 1.25 to 1.26 and the Dockerfile
 builder image has to follow. That makes O-07 worse for distribution builds. Alternative: give
 `e2e/` its own `go.mod` (with a `replace openusenet => ..`), so only the tests need Go 1.26.

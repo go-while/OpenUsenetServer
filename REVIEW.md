@@ -13,8 +13,9 @@ area has had a full read yet.
 
 ## How it works
 
-- Pick an area from the table, set it to "in progress" and say so on the agent-chatroom board
-  (`taking: ...`), so two people don't review the same code.
+- Pick an area from the table, set it to "in progress" and say so in the issue tracker (our
+  agents also use their agent-chatroom board, `taking: ...`), so two people don't review the
+  same code.
 - Each finding gets an ID in ISSUES.md (O-nn). Each fix gets its own branch and one pull
   request, with a test where possible (a unit test, or a check in `e2e/`). Don't collect
   unrelated fixes on one branch.
@@ -39,8 +40,8 @@ reviewed 2× (date).
 | 8 | Admin portal and auth | `internal/admin`, `internal/auth`, `internal/admin/index.html` | ~3,050 + page | Sessions, login, CSRF, access checks per handler, reader and search, archive import from the browser | not started |
 | 9 | Spam and binaries | `internal/cleanfeed`, `internal/binary`, `scripts/cleanfeed-filter.pl`, `scripts/install-cleanfeed.sh` | ~440 + scripts | Calling the external filter, binary detection, flood handling | not started |
 | 10 | Archive, mail, inpaths, ops | `internal/archive`, `internal/mail`, `internal/inpaths`, `internal/ops`, `internal/retention`, `internal/isc`, `internal/wildmat` | ~2,900 | mbox import/export and file paths, SMTP, TOP1000 reports, watchdog, ISC list fetch, wildmat | not started |
-| 11 | Build and packaging | `go.mod`, `Makefile`, `Dockerfile`, `docker-compose.yml` | | Go version, distribution builds, Docker and Podman builds, `go vet` | partial: O-07 reported, O-09 (fixed on dev-gw), O-14 |
-| 12 | Tests and CI | `*_test.go`, `e2e/` | ~4,400 | Coverage of the areas above; the e2e conformance test; no CI workflow yet | partial: `e2e/conformance_test.go` (own module, nntp-testkit v0.11.2, `make e2e`) |
+| 11 | Build and packaging | `go.mod`, `Makefile`, `Dockerfile`, `docker-compose.yml` | | Go version, distribution builds, Docker and Podman builds, `go vet` | partial: O-07 reported, O-09 (fixed on the fork), O-14 |
+| 12 | Tests and CI | `*_test.go`, `e2e/` | ~4,400 | Coverage of the areas above; the e2e conformance test; no CI workflow yet | partial: `e2e/conformance_test.go` on the fork's `dev-gw` (own module, nntp-testkit v0.11.2, `make e2e`) |
 
 Line counts are approximate (non-blank lines, tests included), from `main` at `abe8543`
 (2026-11-09).
@@ -57,7 +58,7 @@ Fixed so far (the open ones are in [ISSUES.md](ISSUES.md)).
 
 | Area | Tests |
 |---|---|
-| 1 | `internal/nntp/session_test.go`; `e2e/conformance_test.go` (41 nntp-testkit checks, RFC 3977/4643/4644) |
+| 1 | `internal/nntp/session_test.go`; `e2e/conformance_test.go` on the fork (41 nntp-testkit checks, RFC 3977/4643/4644) |
 | 2 | `internal/article/*_test.go` |
 | 3 | `internal/store/*_test.go` (mostly the memory store) |
 | 4 | `internal/server/server_test.go` (POST feeds IHAVE between two servers) |
