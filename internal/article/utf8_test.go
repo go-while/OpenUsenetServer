@@ -19,6 +19,20 @@ func TestSanitizeUTF8Latin1(t *testing.T) {
 	}
 }
 
+func TestStorableText(t *testing.T) {
+	for in, want := range map[string]bool{
+		"":            true,
+		"plain\r\n":   true,
+		"café\r\n":    true,
+		"caf\xe9\r\n": false,
+		"a\x00b\r\n":  false,
+	} {
+		if got := article.StorableText([]byte(in)); got != want {
+			t.Errorf("StorableText(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestDecodeWordsSubject(t *testing.T) {
 	in := "=?UTF-8?Q?Russians_are_advised_to_pray_to_Jesus_before_the_start_of_the?= =?UTF-8?Q?_work_week_=E2=80=93_this_will_help_to_better_cope_with_tasks?= =?UTF-8?Q?_and_negativity_from_superiors_and_colleagues.?="
 	want := "Russians are advised to pray to Jesus before the start of the work week – this will help to better cope with tasks and negativity from superiors and colleagues."

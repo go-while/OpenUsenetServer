@@ -86,7 +86,11 @@ func Accept(ctx context.Context, cfg config.Config, st store.Store, mbox *archiv
 		b.WriteString("\r\n")
 	}
 
-	art, err := article.Parse([]byte(b.String()))
+	raw := []byte(b.String())
+	if !article.StorableText(raw) {
+		return nil, errors.New("article is not valid UTF-8 or contains NUL")
+	}
+	art, err := article.Parse(raw)
 	if err != nil {
 		return nil, err
 	}

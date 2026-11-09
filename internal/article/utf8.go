@@ -1,9 +1,17 @@
 package article
 
 import (
+	"bytes"
 	"strings"
 	"unicode/utf8"
 )
+
+// StorableText reports whether raw is valid UTF-8 without NUL bytes, which
+// the PostgreSQL TEXT columns for headers and body require. Articles that
+// fail are refused rather than converted, so stored bytes stay unchanged.
+func StorableText(raw []byte) bool {
+	return utf8.Valid(raw) && bytes.IndexByte(raw, 0) < 0
+}
 
 // SanitizeUTF8 makes text safe for PostgreSQL UTF-8 storage.
 // NUL bytes are stripped (Postgres text rejects them). Invalid UTF-8

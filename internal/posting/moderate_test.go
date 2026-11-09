@@ -142,3 +142,19 @@ func TestAcceptStoresUnmoderated(t *testing.T) {
 		t.Fatalf("numbers %+v", out.Stored.Numbers)
 	}
 }
+
+func TestAcceptRefusesNUL(t *testing.T) {
+	st, cfg := moderatedFixture(t)
+	ctx := context.Background()
+	in := Input{From: "poster@example.org", Newsgroups: "local.test", Subject: "nul", Body: "a\x00b\n"}
+	if _, err := Accept(ctx, cfg, st, nil, nil, nil, in, 0); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("want refusal, got %v", err)
+	}
+	if n, _ := st.CountArticles(ctx); n != 0 {
+		t.Fatalf("refused article stored: %d", n)
+	}
+	in.Body = "café\n"
+	if _, err := Accept(ctx, cfg, st, nil, nil, nil, in, 0); err != nil {
+		t.Fatalf("utf-8 post: %v", err)
+	}
+}

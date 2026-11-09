@@ -921,6 +921,9 @@ func cmdPost(s *Session, _ []string) error {
 		}
 		return err
 	}
+	if !article.StorableText(raw) {
+		return s.conn.Reply(FailPostReject, notStorableReason)
+	}
 	art, err := article.Parse(raw)
 	if err != nil {
 		return s.conn.Reply(FailPostReject, err.Error())
@@ -1116,6 +1119,10 @@ func (s *Session) beginPeerTransferMsg(ctx context.Context, deferCode, accessCod
 	return s.requireFeedAuth(ctx)
 }
 
+// notStorableReason is the reply text for articles that are not valid UTF-8
+// or contain NUL bytes.
+const notStorableReason = "article is not valid UTF-8 or contains NUL"
+
 func (s *Session) replyTransfer(code int, msgid, text string, withMsgID bool) error {
 	if withMsgID {
 		return s.conn.ReplyArgs(code, []string{msgid}, text)
@@ -1124,6 +1131,10 @@ func (s *Session) replyTransfer(code int, msgid, text string, withMsgID bool) er
 }
 
 func (s *Session) acceptPeerArticle(ctx context.Context, msgid string, raw []byte, rejectCode, deferCode, okCode int, withMsgID bool) error {
+	if !article.StorableText(raw) {
+		s.rememberReject(msgid)
+		return s.replyTransfer(rejectCode, msgid, notStorableReason, withMsgID)
+	}
 	art, err := article.Parse(raw)
 	if err != nil {
 		s.rememberReject(msgid)

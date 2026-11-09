@@ -653,3 +653,82 @@ func TestIHaveUnapprovedModeratedStaysStored(t *testing.T) {
 		t.Fatalf("not stored %q", first)
 	}
 }
+
+func charsetArticle(msgid, body string) string {
+	return "Path: other!not-for-mail\r\n" +
+		"From: a@b.c\r\n" +
+		"Newsgroups: local.test\r\n" +
+		"Subject: charset\r\n" +
+		"Date: Mon, 01 Jan 2024 00:00:00 +0000\r\n" +
+		"Message-ID: " + msgid + "\r\n" +
+		"\r\n" +
+		body + "\r\n" +
+		".\r\n"
+}
+
+func TestRefuseNonUTF8Article(t *testing.T) {
+	c, st := startTestServer(t)
+	ctx := context.Background()
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	ihave := func(msgid, body string) string {
+		t.Helper()
+		_, _ = c.Write([]byte("IHAVE " + msgid + "\r\n"))
+		if l := readLine(t, r); !strings.HasPrefix(l, "335 ") {
+			t.Fatalf("ihave cont %q", l)
+		}
+		_, _ = c.Write([]byte(charsetArticle(msgid, body)))
+		return readLine(t, r)
+	}
+	post := func(body string) string {
+		t.Helper()
+		_, _ = c.Write([]byte("POST\r\n"))
+		if l := readLine(t, r); !strings.HasPrefix(l, "340 ") {
+			t.Fatalf("post cont %q", l)
+		}
+		_, _ = c.Write([]byte("From: a@b.c\r\nNewsgroups: local.test\r\nSubject: charset\r\n\r\n" + body + "\r\n.\r\n"))
+		return readLine(t, r)
+	}
+
+	if l := ihave("<latin1-ihave@news.test>", "caf\xe9 noir"); !strings.HasPrefix(l, "437 ") {
+		t.Fatalf("ihave latin-1 %q", l)
+	}
+	if l := ihave("<nul-ihave@news.test>", "a\x00b"); !strings.HasPrefix(l, "437 ") {
+		t.Fatalf("ihave nul %q", l)
+	}
+	_, _ = c.Write([]byte("IHAVE <latin1-ihave@news.test>\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "435 ") {
+		t.Fatalf("refused msgid not remembered %q", l)
+	}
+	if l := post("caf\xe9"); l != "441 article is not valid UTF-8 or contains NUL" {
+		t.Fatalf("post latin-1 %q", l)
+	}
+
+	_, _ = c.Write([]byte("MODE STREAM\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "203 ") {
+		t.Fatalf("mode stream %q", l)
+	}
+	msgid := "<latin1-takethis@news.test>"
+	_, _ = c.Write([]byte("TAKETHIS " + msgid + "\r\n" + charsetArticle(msgid, "caf\xe9")))
+	if l := readLine(t, r); l != "439 "+msgid+" article is not valid UTF-8 or contains NUL" {
+		t.Fatalf("takethis latin-1 %q", l)
+	}
+	if n, _ := st.CountArticles(ctx); n != 0 {
+		t.Fatalf("refused articles stored: %d", n)
+	}
+
+	msgid = "<utf8-takethis@news.test>"
+	_, _ = c.Write([]byte("TAKETHIS " + msgid + "\r\n" + charsetArticle(msgid, "café")))
+	if l := readLine(t, r); !strings.HasPrefix(l, "239 ") {
+		t.Fatalf("takethis utf-8 %q", l)
+	}
+	if l := ihave("<utf8-ihave@news.test>", "café"); !strings.HasPrefix(l, "235 ") {
+		t.Fatalf("ihave utf-8 %q", l)
+	}
+	if l := post("café"); !strings.HasPrefix(l, "240 ") {
+		t.Fatalf("post utf-8 %q", l)
+	}
+	if n, _ := st.CountArticles(ctx); n != 3 {
+		t.Fatalf("want 3 stored articles, got %d", n)
+	}
+}
