@@ -1,4 +1,4 @@
-.PHONY: build test vet run compose-up compose-down
+.PHONY: build test e2e vet run compose-up compose-down
 
 BIN := bin/openusenet
 
@@ -11,6 +11,9 @@ vet:
 
 test:
 	go test ./...
+
+e2e:
+	cd e2e && go test -tags e2e -count=1 -v .
 
 run: build
 	./$(BIN) serve --config config.example.yml
