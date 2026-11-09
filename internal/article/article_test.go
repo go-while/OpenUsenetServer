@@ -83,6 +83,41 @@ func TestInjectForPostInjectionDate(t *testing.T) {
 	}
 }
 
+func TestInjectForPostInjectionInfo(t *testing.T) {
+	cases := []struct {
+		account, want string
+	}{
+		{"", "news.example"},
+		{"nc-interop", `news.example; posting-account="nc-interop"`},
+		{"a\"b\\c\r\nd", `news.example; posting-account="a\"b\\cd"`},
+	}
+	for _, c := range cases {
+		a, err := Parse([]byte("From: a@b.c\r\nNewsgroups: misc.test\r\nSubject: hi\r\n\r\nbody\r\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := InjectForPost(a, InjectOpts{Hostname: "news.example", Pathhost: "news.example", PostingAccount: c.account}); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.Get("Injection-Info"); got != c.want {
+			t.Errorf("account %q: Injection-Info %q, want %q", c.account, got, c.want)
+		}
+	}
+}
+
+func TestInjectForPostKeepsInjectionInfo(t *testing.T) {
+	a, err := Parse([]byte("From: a@b.c\r\nNewsgroups: misc.test\r\nSubject: hi\r\nInjection-Info: other.example\r\n\r\nbody\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := InjectForPost(a, InjectOpts{Hostname: "news.example", Pathhost: "news.example", PostingAccount: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Get("Injection-Info"); got != "other.example" {
+		t.Fatalf("Injection-Info %q, want it unchanged", got)
+	}
+}
+
 func TestInjectForIHaveRequiresMessageID(t *testing.T) {
 	a, err := Parse([]byte("From: a@b.c\r\nNewsgroups: local.test\r\nSubject: x\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\n\r\nb\r\n"))
 	if err != nil {

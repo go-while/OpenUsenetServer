@@ -926,9 +926,10 @@ func cmdPost(s *Session, _ []string) error {
 		return s.conn.Reply(FailPostReject, err.Error())
 	}
 	if err := article.InjectForPost(art, article.InjectOpts{
-		Pathhost:     s.cfg.Server.Pathhost,
-		Hostname:     s.cfg.Server.Hostname,
-		Organization: s.cfg.Server.Organization,
+		Pathhost:       s.cfg.Server.Pathhost,
+		Hostname:       s.cfg.Server.Hostname,
+		Organization:   s.cfg.Server.Organization,
+		PostingAccount: s.authUser,
 	}); err != nil {
 		return s.conn.Reply(FailPostReject, err.Error())
 	}

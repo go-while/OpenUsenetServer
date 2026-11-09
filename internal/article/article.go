@@ -180,6 +180,9 @@ type InjectOpts struct {
 	Hostname     string
 	Organization string
 	Now          time.Time
+	// PostingAccount is the authenticated poster, written as the
+	// posting-account parameter of Injection-Info. Empty omits it.
+	PostingAccount string
 }
 
 // InjectForPost validates and fills RFC 5536 injection headers.
@@ -226,10 +229,33 @@ func InjectForPost(a *Article, opt InjectOpts) error {
 		a.Set("Injection-Date", opt.Now.UTC().Format(time.RFC1123Z))
 	}
 	if !a.Has("Injection-Info") {
-		a.Set("Injection-Info", fmt.Sprintf("%s; posting-account=\"openusenet\"", opt.Hostname))
+		info := opt.Hostname
+		if acct := quoteParam(opt.PostingAccount); acct != "" {
+			info += "; posting-account=" + acct
+		}
+		a.Set("Injection-Info", info)
 	}
 	stripXref(a)
 	return nil
+}
+
+// quoteParam returns v as an RFC 5322 quoted-string, or "" when v is empty.
+// Control characters are dropped; '"' and '\' are escaped.
+func quoteParam(v string) string {
+	var b strings.Builder
+	for _, r := range v {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			continue
+		case r == '"' || r == '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return `"` + b.String() + `"`
 }
 
 // InjectForIHave validates a transferred article and prepends Path.
