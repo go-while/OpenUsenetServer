@@ -28,6 +28,7 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | Diablo feed interop | Diablo `dnewslink`, 5 articles per mode, then resent | streaming and IHAVE work; duplicates get 438/435; one finding (O-05) |
 | Build report | OCTADE, `news.software.nntp` 815 (2026-10-06) | does not build on Debian; Docker and Podman builds fail on package conflicts (O-07) |
 | NewsCache interop | NewsCache 1.3.23 with OUS as upstream, 203 commands direct vs through the cache, twice; 3 posts | reads, error codes and COMPRESS fallback match; posted bodies byte-exact; three findings (O-10 to O-12) |
+| usenet_archiver real-server test | 16 tricky articles each by POST and IHAVE, pulled back 4 times with the archiver (run r20261109T150600-188e36) | 30 of 32 accepted; archiver side exact; two new findings (O-15, O-16), O-13 on POST, O-05 and O-12 seen again |
 
 ## Overview
 
@@ -47,6 +48,8 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | open |
 | [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | open |
 | [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open |
+| [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open |
+| [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open |
 
 ## Details
 
@@ -179,13 +182,36 @@ KOI8-R, Shift-JIS, ...) and yEnc binaries are 8-bit by design, so this probably 
 part of a real feed, binary groups included. Converting with `SanitizeUTF8` would store the
 article but change its bytes (and RFC 5537 forbids that); storing head and body as `bytea`
 keeps them byte-exact. Until then, a permanent reject (437/439) is better than 436.
-Verified (reproduced). Found while answering usenet_archiver's questions.
+Verified (reproduced). Found while answering usenet_archiver's questions. The usenet_archiver
+test then showed the POST side: a Latin-1 body gets `403 internal error` (any error a command
+handler returns ends in that generic reply, `internal/nntp/session.go:89-90`); RFC 3977 wants
+441 for a refused POST.
 
 ### O-14 go vet fails on main
 `internal/mail/settings.go:113` is `s.Password = s.Password` (next to the `TrimSpace` lines for
 the other fields), and `go vet ./...` stops there with "self-assignment of s.Password". If the
 point is that passwords are not trimmed, a comment instead of the assignment says so and keeps
 `go vet` clean, so it can run in CI. Verified.
+
+### O-15 A bare CR or LF becomes a line break
+`article.Parse` starts with `normalizeNewlines` (`internal/article/article.go:44-49`), which
+turns every CRLF into LF, then every remaining CR into LF, then every LF into CRLF. A CR or LF
+that is part of a line's data is therefore turned into a line break: a body line
+`col1\rcol2 on one line` is stored and served as two lines, `col1` and `col2 on one line`
+(POST and IHAVE alike). RFC 3977 section 3.1.1 allows a server to refuse such articles, but
+not to change them (RFC 5537). Options: keep the bytes (best for archives and binaries), or
+refuse with 441 (POST) and 437/439 (IHAVE/TAKETHIS). Verified (reading the code; reproduced by
+the usenet_archiver test, `cr.post` and `cr.ihave`).
+
+### O-16 A header line without a colon is mangled, not refused
+`parseHeaders` cuts each header line at its first colon (`internal/article/article.go:74-79`)
+and only refuses a line with no colon at all. A line such as
+`From nobody Thu Dec  8 12:55:04 2016` inside the head becomes a field named
+`From nobody Thu Dec  8 12` with the value `55:04 2016`, and `Wire()` writes it back as
+`From nobody Thu Dec  8 12: 55:04 2016`. A field name may not contain spaces (RFC 5536 section
+2.2 via RFC 5322 section 3.6.8), so the head is invalid and should be refused (go-pugleaf
+answers `invalid header block`). Verified (reading the code; reproduced by the usenet_archiver
+test, `fromhdr2.post` and `fromhdr2.ihave`).
 
 ## Checked, not a bug
 
