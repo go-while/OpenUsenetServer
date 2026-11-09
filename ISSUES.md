@@ -30,6 +30,7 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | NewsCache interop | NewsCache 1.3.23 with OUS as upstream, 203 commands direct vs through the cache, twice; 3 posts | reads, error codes and COMPRESS fallback match; posted bodies byte-exact; three findings (O-10 to O-12) |
 | usenet_archiver real-server test | 16 tricky articles each by POST and IHAVE, pulled back 4 times with the archiver (run r20261109T150600-188e36) | 30 of 32 accepted; archiver side exact; two new findings (O-15, O-16), O-13 on POST, O-05 and O-12 seen again |
 | INN interop | INN 2.8.0 prerelease (upstream `main` 4c5218607): innfeed -> OUS, OUS -> innd (streaming), 5 posts each way compared article by article; nntp-testkit against INN (`innd` and `nnrpd`) | both directions work, nothing loops; INN keeps heads byte-exact and writes Xref, OUS does not (O-05, O-10); no new findings |
+| Diablo interop, OUS feeding | Diablo `main` 5f3a3cc: OUS peer on Diablo's streaming port and on an IHAVE-only proxy, 3 posts each, read back from Diablo's reader | all 6 arrive with body and head identical to what OUS serves; findings O-17, O-18 |
 
 ## Conformance side by side
 
@@ -64,6 +65,8 @@ answers reader commands with 480).
 | [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open |
 | [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open |
 | [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open |
+| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open |
+| [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open |
 
 ## Details
 
@@ -226,6 +229,26 @@ and only refuses a line with no colon at all. A line such as
 2.2 via RFC 5322 section 3.6.8), so the head is invalid and should be refused (go-pugleaf
 answers `invalid header block`). Verified (reading the code; reproduced by the usenet_archiver
 test, `fromhdr2.post` and `fromhdr2.ihave`).
+
+### O-17 The feeder opens one connection per article
+`drainOnce` (`internal/feed/feed.go:128-150`) delivers each queued article with its own
+`deliverArticle` call, and `deliverArticle` (`internal/feed/stream.go:16-51`) dials the peer,
+reads the greeting, logs in if configured, sends CAPABILITIES, transfers that one article and
+sends QUIT. Seen by inn-1 in INN's logs: every connection from OUS accepted exactly one article
+and closed, up to three at once. With streaming, CHECK and TAKETHIS go one at a time and wait
+for each reply (`streamingTransfer`, `stream.go:115-153`), so the point of RFC 4644 (pipelined
+CHECKs on a long-lived connection) is lost. It works for a small feed, but a real peer expects a
+persistent connection per peer that carries a queue of articles; with a full feed the
+connection rate alone can trip peers' rate limits. Verified (reading the code; seen with INN).
+
+### O-18 No streaming to a peer without CAPABILITIES
+`peerSupportsStreaming` (`internal/feed/stream.go:85-114`) sends CAPABILITIES and, when the
+reply is not 101, treats the peer as IHAVE-only. Diablo's feeder answers CAPABILITIES with
+`500 Syntax error or bad command` (a gap on Diablo's side, RFC 3977 makes CAPABILITIES
+mandatory) but accepts `MODE STREAM` with 203, so OUS feeds Diablo by IHAVE although it could
+stream. Trying `MODE STREAM` when CAPABILITIES fails would cover such
+peers. The articles still arrive, so this is only about efficiency. Verified (reading the code;
+Diablo interop run).
 
 ## Checked, not a bug
 
