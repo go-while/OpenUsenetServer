@@ -226,6 +226,54 @@ func TestFetchByMsgidDoesNotChangeCurrent(t *testing.T) {
 	}
 }
 
+func TestOverByMsgidMatchesByNumber(t *testing.T) {
+	c, _ := startTestServer(t)
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	_, _ = c.Write([]byte("POST\r\n"))
+	_ = readLine(t, r)
+	_, _ = c.Write([]byte("From: a@b.c\r\nNewsgroups: local.test\r\nSubject: over\ttab\r\n" +
+		"Organization: Test Org\r\nUser-Agent: test/1.0\r\nX-Extra: some extra header\r\n" +
+		"\r\nline one\r\nline two\r\n.\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "240 ") {
+		t.Fatalf("post %q", l)
+	}
+	_, _ = c.Write([]byte("GROUP local.test\r\n"))
+	_ = readLine(t, r)
+	_, _ = c.Write([]byte("OVER 1\r\n"))
+	first, byNum := readBlock(t, r)
+	if !strings.HasPrefix(first, "224 ") || len(byNum) != 1 {
+		t.Fatalf("over by number %q %q", first, byNum)
+	}
+	numFields := strings.Split(byNum[0], "\t")
+	if len(numFields) != 9 {
+		t.Fatalf("over by number: want 9 fields (a TAB in Subject must become a space): %q", byNum[0])
+	}
+	if numFields[1] != "over tab" {
+		t.Fatalf("subject field %q, want %q", numFields[1], "over tab")
+	}
+	msgid := numFields[4]
+	_, _ = c.Write([]byte("OVER " + msgid + "\r\n"))
+	first, byID := readBlock(t, r)
+	if !strings.HasPrefix(first, "224 ") || len(byID) != 1 {
+		t.Fatalf("over by msgid %q %q", first, byID)
+	}
+	idFields := strings.Split(byID[0], "\t")
+	if len(idFields) != len(numFields) {
+		t.Fatalf("field count differs: by number %q, by msgid %q", byNum[0], byID[0])
+	}
+	if idFields[0] != "0" {
+		t.Fatalf("over by msgid should report number 0: %q", byID[0])
+	}
+	if idFields[6] != numFields[6] || idFields[7] != numFields[7] {
+		t.Fatalf(":bytes/:lines differ: by number %s/%s, by msgid %s/%s",
+			numFields[6], numFields[7], idFields[6], idFields[7])
+	}
+	if strings.Join(idFields[1:], "\t") != strings.Join(numFields[1:], "\t") {
+		t.Fatalf("over lines differ beyond the number: by number %q, by msgid %q", byNum[0], byID[0])
+	}
+}
+
 func TestPipelinedGroupStat(t *testing.T) {
 	c, _ := startTestServer(t)
 	r := bufio.NewReader(c)
