@@ -239,7 +239,8 @@ and closed, up to three at once. With streaming, CHECK and TAKETHIS go one at a 
 for each reply (`streamingTransfer`, `stream.go:115-153`), so the point of RFC 4644 (pipelined
 CHECKs on a long-lived connection) is lost. It works for a small feed, but a real peer expects a
 persistent connection per peer that carries a queue of articles; with a full feed the
-connection rate alone can trip peers' rate limits. Verified (reading the code; seen with INN).
+connection rate alone can trip peers' rate limits. Verified (reading the code; seen in INN's
+logs and in Diablo's: `ihave=1 ... acc=1` and a disconnect for every connection).
 
 ### O-18 No streaming to a peer without CAPABILITIES
 `peerSupportsStreaming` (`internal/feed/stream.go:85-114`) sends CAPABILITIES and, when the
@@ -248,7 +249,8 @@ reply is not 101, treats the peer as IHAVE-only. Diablo's feeder answers CAPABIL
 mandatory) but accepts `MODE STREAM` with 203, so OUS feeds Diablo by IHAVE although it could
 stream. Trying `MODE STREAM` when CAPABILITIES fails would cover such
 peers. The articles still arrive, so this is only about efficiency. Verified (reading the code;
-Diablo interop run).
+confirmed in Diablo's feeder log: every OUS session on the streaming port was
+`ihave=1 chk=0 takethis=0`).
 
 ## Checked, not a bug
 
