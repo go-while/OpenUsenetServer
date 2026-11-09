@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"openusenet/internal/article"
 	wmat "openusenet/internal/wildmat"
 )
 
@@ -543,13 +544,7 @@ func pickHeader(header string, a *StoredArticle) string {
 	case "xref":
 		return a.Xref
 	default:
-		for _, line := range strings.Split(a.Headers, "\r\n") {
-			k, v, ok := strings.Cut(line, ":")
-			if ok && strings.EqualFold(k, header) {
-				return strings.TrimSpace(v)
-			}
-		}
-		return ""
+		return article.HeaderValue(a.Headers, header)
 	}
 }
 

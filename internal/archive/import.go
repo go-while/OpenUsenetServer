@@ -46,7 +46,7 @@ func Import(ctx context.Context, st store.Store, r io.Reader, opt ImportOpts) (I
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		art, err := article.Parse(normalizeImportRaw(raw))
+		art, err := article.ParseLenient(normalizeImportRaw(raw))
 		if err != nil {
 			res.Skipped++
 			return nil
@@ -85,7 +85,7 @@ func Import(ctx context.Context, st store.Store, r io.Reader, opt ImportOpts) (I
 			res.Duplicates++
 			return nil
 		}
-		hdr := art.RawHeaders
+		hdr := art.RawHeaders()
 		body := art.Body
 		// Prefer wire split so stored headers match article.Parse conventions.
 		if w := art.Wire(); len(w) > 0 {
@@ -93,7 +93,7 @@ func Import(ctx context.Context, st store.Store, r io.Reader, opt ImportOpts) (I
 				hdr, body = h, b
 			}
 		}
-		isBin := binary.LooksBinary(art.RawHeaders, art.Body)
+		isBin := binary.LooksBinary(art.RawHeaders(), art.Body)
 		_, err = st.Post(ctx, hdr, body, msgid,
 			art.Get("Subject"), art.Get("From"), art.Get("Date"), art.Get("References"),
 			opt.Hostname, art.Bytes(), art.Lines(), groups, isBin)

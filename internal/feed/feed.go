@@ -183,7 +183,7 @@ func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem) (accepted 
 		return false, fmt.Sprintf("not sent %s -> %s (article missing)", it.MessageID, label), nil
 	}
 	wire := []byte(art.Headers + "\r\n\r\n" + art.Body)
-	parsed, _ := article.Parse(wire)
+	parsed, _ := article.ParseLenient(wire)
 	view := ViewFromArticle(parsed, len(wire))
 	if parsed == nil {
 		view = ArticleView{Bytes: len(wire)}

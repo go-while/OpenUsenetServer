@@ -8,9 +8,9 @@ import (
 
 func TestOverviewLineXrefFull(t *testing.T) {
 	a := &Article{
-		Headers: map[string][]string{
-			"Subject": {"hello"}, "From": {"a@b.c"}, "Date": {"Mon, 01 Jan 2024 00:00:00 +0000"},
-			"Message-ID": {"<1@news.test>"}, "References": {"<0@news.test>"},
+		Head: []string{
+			"Subject: hello", "From: a@b.c", "Date: Mon, 01 Jan 2024 00:00:00 +0000",
+			"Message-ID: <1@news.test>", "References: <0@news.test>",
 		},
 		Body: "body\r\n",
 	}

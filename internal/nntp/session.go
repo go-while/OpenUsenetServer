@@ -496,9 +496,9 @@ func cmdOver(s *Session, args []string) error {
 			return s.conn.Reply(FailMsgidNotFound, "no article with that message-id")
 		}
 		line := article.OverviewLine(0, &article.Article{
-			Headers: map[string][]string{
-				"Subject": {a.Subject}, "From": {a.From}, "Date": {a.Date},
-				"Message-ID": {a.MessageID}, "References": {a.Refs},
+			Head: []string{
+				"Subject: " + a.Subject, "From: " + a.From, "Date: " + a.Date,
+				"Message-ID: " + a.MessageID, "References: " + a.Refs,
 			},
 			Body: a.Body,
 		}, a.Xref)
@@ -596,13 +596,7 @@ func hdrFromStored(header string, a *store.StoredArticle) string {
 	case "xref":
 		return a.Xref
 	default:
-		for _, line := range strings.Split(a.Headers, "\r\n") {
-			k, v, ok := strings.Cut(line, ":")
-			if ok && strings.EqualFold(k, header) {
-				return strings.TrimSpace(v)
-			}
-		}
-		return ""
+		return article.HeaderValue(a.Headers, header)
 	}
 }
 
@@ -961,7 +955,7 @@ func cmdPost(s *Session, _ []string) error {
 	if err := s.submitModerated(ctx, art); err != nil {
 		return err
 	}
-	isBin := binary.LooksBinary(art.RawHeaders, art.Body)
+	isBin := binary.LooksBinary(art.RawHeaders(), art.Body)
 	if isBin && s.authOK && s.authUserID > 0 {
 		limit := s.cfg.Retention.UserBinaryPostsPerDay
 		if limit > 0 {
@@ -1190,7 +1184,7 @@ func (s *Session) acceptPeerArticle(ctx context.Context, msgid string, raw []byt
 	if dup {
 		return s.replyTransfer(rejectCode, msgid, "duplicate Message-ID", withMsgID)
 	}
-	isBin := binary.LooksBinary(art.RawHeaders, art.Body)
+	isBin := binary.LooksBinary(art.RawHeaders(), art.Body)
 	if _, err := s.storeArticle(ctx, art, wire, isBin); errors.Is(err, store.ErrNoGroup) {
 		s.rememberReject(msgid)
 		return s.replyTransfer(rejectCode, msgid, "newsgroup does not exist", withMsgID)
