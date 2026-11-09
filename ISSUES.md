@@ -53,7 +53,7 @@ answers reader commands with 480).
 | [O-02](#o-02-authinfo-pass-before-user-gets-501-not-482) | Low | AUTHINFO PASS before USER gets 501 instead of 482 | PR (#4) |
 | [O-03](#o-03-authinfo-after-a-login-is-accepted-and-drops-the-login) | Low | AUTHINFO after a successful login is accepted (381) instead of 502, and logs the session out | PR (#4) |
 | [O-04](#o-04-capabilities-still-lists-authinfo-after-a-login) | Low | CAPABILITIES still lists `AUTHINFO USER` after a login | PR (#4) |
-| [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | open |
+| [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | open (fix: fork branch `fix/takethis-reply-text`) |
 | [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Medium | Build fails on Debian, Docker and Podman builds fail on package conflicts | open (reported) |
 | [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | decision |
@@ -61,10 +61,10 @@ answers reader commands with 480).
 | [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open |
 | [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open (fix: fork branch `fix/over-msgid-bytes`) |
 | [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | open (fix: fork branch `fix/posting-account`) |
-| [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | open (short-term fix, 437/439/441: fork branch `fix/refuse-non-utf8`) |
+| [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | open (fix: fork branch `fix/store-articles-bytea`; verified on PostgreSQL 16 incl. migration of a live test DB) |
 | [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open (fix: fork branch `fix/go-vet-self-assign`) |
-| [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open |
-| [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open |
+| [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open (fix: fork branch `fix/keep-article-bytes`) |
+| [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open |
 | [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open |
 | [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
