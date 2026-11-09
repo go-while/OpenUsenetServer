@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"openusenet/internal/article"
+	"openusenet/internal/auth"
 	"openusenet/internal/config"
 	"openusenet/internal/mail"
 	"openusenet/internal/moderate"
@@ -89,6 +90,66 @@ func TestGreetingAndCapabilities(t *testing.T) {
 	_, _ = c.Write([]byte("QUIT\r\n"))
 	if q := readLine(t, r); !strings.HasPrefix(q, "205 ") {
 		t.Fatalf("quit %q", q)
+	}
+}
+
+func TestAuthinfoRFC4643(t *testing.T) {
+	c, st := startTestServer(t)
+	hash, err := auth.HashPassword("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(context.Background(), store.User{Username: "alice", PasswordHash: hash, CanPost: true}); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	cmd := func(line string) string {
+		t.Helper()
+		if _, err := c.Write([]byte(line + "\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		return readLine(t, r)
+	}
+	caps := func() string {
+		t.Helper()
+		_, _ = c.Write([]byte("CAPABILITIES\r\n"))
+		_, lines := readBlock(t, r)
+		return strings.Join(lines, "\n")
+	}
+
+	if !strings.Contains(caps(), "AUTHINFO USER") {
+		t.Fatal("AUTHINFO USER not advertised before login")
+	}
+	if l := cmd("AUTHINFO PASS secret"); !strings.HasPrefix(l, "482 ") {
+		t.Fatalf("pass without user %q", l)
+	}
+	if l := cmd("AUTHINFO USER alice"); !strings.HasPrefix(l, "381 ") {
+		t.Fatalf("user %q", l)
+	}
+	if l := cmd("AUTHINFO PASS wrong"); !strings.HasPrefix(l, "481 ") {
+		t.Fatalf("wrong pass %q", l)
+	}
+	if l := cmd("AUTHINFO USER alice"); !strings.HasPrefix(l, "381 ") {
+		t.Fatalf("retry user %q", l)
+	}
+	if l := cmd("AUTHINFO PASS secret"); !strings.HasPrefix(l, "281 ") {
+		t.Fatalf("retry pass %q", l)
+	}
+	if l := cmd("AUTHINFO USER alice"); !strings.HasPrefix(l, "502 ") {
+		t.Fatalf("user after auth %q", l)
+	}
+	if l := cmd("AUTHINFO PASS secret"); !strings.HasPrefix(l, "502 ") {
+		t.Fatalf("pass after auth %q", l)
+	}
+	if strings.Contains(caps(), "AUTHINFO") {
+		t.Fatal("AUTHINFO still advertised after login")
+	}
+	if l := cmd("POST"); !strings.HasPrefix(l, "340 ") {
+		t.Fatalf("session no longer authenticated, post %q", l)
+	}
+	if l := cmd("From: alice@example.com\r\nNewsgroups: local.test\r\nSubject: auth\r\n\r\nhi\r\n."); !strings.HasPrefix(l, "240 ") {
+		t.Fatalf("post after auth %q", l)
 	}
 }
 
