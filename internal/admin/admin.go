@@ -642,7 +642,7 @@ func (p *Portal) article(w http.ResponseWriter, r *http.Request, _ store.User) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"message_id": a.MessageID,
-		"headers":    article.DecodeHeaderBlock(a.Headers),
+		"headers":    article.SanitizeUTF8(article.DecodeHeaderBlock(a.Headers)),
 		"body":       article.DecodeBodyForDisplay(a.Headers, a.Body),
 		"subject":    article.DecodeWords(a.Subject),
 		"from":       article.DecodeWords(a.From),
