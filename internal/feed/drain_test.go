@@ -149,8 +149,8 @@ func testWire(msgid string) []byte {
 	return append(testHead(msgid), []byte("\r\n\r\nbody line\r\n")...)
 }
 
-// fakePeer is a streaming transit peer on 127.0.0.1 that counts open connections and offers.
-type fakePeer struct {
+// drainPeer is a streaming transit peer on 127.0.0.1 that counts open connections and offers.
+type drainPeer struct {
 	ln         net.Listener
 	greetDelay time.Duration // before the greeting
 	trickle    bool          // CAPABILITIES never ends: one line every 50 ms
@@ -165,13 +165,13 @@ type fakePeer struct {
 	closing chan struct{}
 }
 
-func startPeer(t *testing.T, greetDelay time.Duration, trickle bool) *fakePeer {
+func startPeer(t *testing.T, greetDelay time.Duration, trickle bool) *drainPeer {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &fakePeer{ln: ln, greetDelay: greetDelay, trickle: trickle,
+	p := &drainPeer{ln: ln, greetDelay: greetDelay, trickle: trickle,
 		offers: map[string]int{}, got: map[string]bool{}, closing: make(chan struct{})}
 	go p.accept()
 	t.Cleanup(func() {
@@ -182,12 +182,12 @@ func startPeer(t *testing.T, greetDelay time.Duration, trickle bool) *fakePeer {
 	return p
 }
 
-func (p *fakePeer) storePeer() store.Peer {
+func (p *drainPeer) storePeer() store.Peer {
 	addr := p.ln.Addr().(*net.TCPAddr)
 	return store.Peer{ID: 1, Name: "fakepeer", Host: "127.0.0.1", Port: addr.Port, Patterns: "*", Enabled: true}
 }
 
-func (p *fakePeer) accept() {
+func (p *drainPeer) accept() {
 	for {
 		c, err := p.ln.Accept()
 		if err != nil {
@@ -212,7 +212,7 @@ func (p *fakePeer) accept() {
 	}
 }
 
-func (p *fakePeer) serve(c net.Conn) {
+func (p *drainPeer) serve(c net.Conn) {
 	go func() { <-p.closing; _ = c.Close() }()
 	select {
 	case <-time.After(p.greetDelay):
@@ -268,7 +268,7 @@ func (p *fakePeer) serve(c net.Conn) {
 	}
 }
 
-func (p *fakePeer) snapshot() (maxOpen, conns int, offers map[string]int, got int) {
+func (p *drainPeer) snapshot() (maxOpen, conns int, offers map[string]int, got int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	offers = make(map[string]int, len(p.offers))
