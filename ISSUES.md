@@ -74,6 +74,8 @@ answers reader commands with 480).
 | [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | open |
 | [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open |
 | [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | open (fix: fork branch `fix/hdr-no-current-article`) |
+| [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | open (fix: fork branch `fix/inbound-peer-by-hostname`) |
+| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`) |
 
 ## Details
 
@@ -307,6 +309,32 @@ current number as the range, so in a group without a current article (number 0) 
 when the current article was cancelled or expired after GROUP selected it. Verified; found by
 nntp-testkit's new no-current-article check (kit `main`, before v0.12.0), the expired case by
 ous-sol's review.
+
+### O-24 A peer configured by hostname can feed any group
+Admission (`inbound.Allowed`, `internal/nntp/session.go:1110`) matches the connecting address
+against peer hosts by IP, CIDR or a forward DNS lookup of a hostname (`internal/inbound/allow.go`).
+The peer whose patterns then filter the article is picked by `matchInboundPeer`
+(`session.go:856`), which only compares the connecting IP as text with `incoming_host`, `host`
+and `name`. For a peer configured by hostname (the usual way) that never matches, so
+`acceptPeerArticle` finds no peer and applies no patterns (`session.go:1156`): the peer can feed
+any group, whatever its subscription says. Peers configured by IP, and peers that logged in with
+the feed password, are matched correctly. OUS never uses reverse (PTR) lookups. Verified with a
+peer `localhost` (patterns `local.*`, inbound closed): an article for `alt.test` got 235
+(`TestHostnamePeerPatternsApply` on the fix branch).
+
+### O-25 The suggested peer password can be computed by anyone
+A peer's page in the admin portal shows INN snippets for the other side, and the
+`incoming.conf` snippet contains `password:` from `peerauth.PairPassword`
+(`internal/admin/admin.go:844`): the first 16 hex digits of SHA-256 over the two path hostnames
+and a fixed string. Both hostnames are in every Path header, so anyone can compute the password
+of any pair of peers (shown on a test server: the portal's value and one computed from the two
+names alone were the same). Versions from `7724153` to `6c348b5` also stored this value in
+peers' password fields. The impact is low, because peers are matched by address first, but a
+password that is not secret is no password. OUS itself never sends the derived value unless it is
+stored as the peer's outgoing password. Fix: the snippet shows the peer's outgoing password, or
+a random secret created once per peer and stored; `PairPassword` stays, and the portal warns when
+a peer still uses a derived password. Stored passwords are not changed, so existing feeds keep
+working. Verified.
 
 ## Checked, not a bug
 
