@@ -137,7 +137,7 @@ var commands = map[string]cmd{
 	"IHAVE":        {2, 2, cmdIHave},
 	"CHECK":        {2, 2, cmdCheck},
 	"TAKETHIS":     {2, 2, cmdTakeThis},
-	"AUTHINFO":     {2, 3, cmdAuthinfo},
+	"AUTHINFO":     {2, 4, cmdAuthinfo}, // 4: AUTHINFO SASL mechanism initial-response
 	"NEWNEWS":      {4, 5, cmdNewnews},
 	"NEWGROUPS":    {3, 4, cmdNewgroups},
 	"SLAVE":        {1, 1, cmdSlave},

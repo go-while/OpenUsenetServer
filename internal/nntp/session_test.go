@@ -121,6 +121,9 @@ func TestAuthinfoRFC4643(t *testing.T) {
 	if !strings.Contains(caps(), "AUTHINFO USER") {
 		t.Fatal("AUTHINFO USER not advertised before login")
 	}
+	if l := cmd("AUTHINFO USER alice extra"); !strings.HasPrefix(l, "501 ") {
+		t.Fatalf("user with an extra argument %q", l)
+	}
 	if l := cmd("AUTHINFO PASS secret"); !strings.HasPrefix(l, "482 ") {
 		t.Fatalf("pass without user %q", l)
 	}
@@ -141,6 +144,10 @@ func TestAuthinfoRFC4643(t *testing.T) {
 	}
 	if l := cmd("AUTHINFO PASS secret"); !strings.HasPrefix(l, "502 ") {
 		t.Fatalf("pass after auth %q", l)
+	}
+	// The SASL form has four words; it must reach the "already authenticated" check too.
+	if l := cmd("AUTHINFO SASL PLAIN ="); !strings.HasPrefix(l, "502 ") {
+		t.Fatalf("sasl after auth %q", l)
 	}
 	if strings.Contains(caps(), "AUTHINFO") {
 		t.Fatal("AUTHINFO still advertised after login")
