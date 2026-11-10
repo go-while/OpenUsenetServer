@@ -8,8 +8,10 @@ package e2e
 // The feeder delivers asynchronously (Offer enqueues, then a drain goroutine connects), so
 // every test waits for a count with testkit.WaitFor and then asserts exact counts. A test that
 // expects an article NOT to be offered posts a control article after it and waits for that one:
-// the decision to enqueue is made synchronously in POST (before the 240), so once the control
-// article has arrived and the queue is empty, the excluded one can no longer come.
+// POST sends its 240 and then enqueues (cmdPost calls offer right after the reply), and one
+// session handles its commands in order, so the excluded article is queued (or not) before the
+// control POST is read. Once the control article has arrived and the queue is empty, the
+// excluded one can no longer come.
 
 import (
 	"context"
