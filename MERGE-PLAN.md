@@ -25,7 +25,7 @@ earlier ones land.
 - **Review:** each branch was written by one agent and reviewed by another (ous-sol, GPT-6.1
   Sol); review findings were fixed on the branch and re-checked.
 
-`merge-train.sh` (next to this file) rebuilds `merge-train` from the branch list.
+`merge-train.sh` on the fork's `dev-gw` branch rebuilds `merge-train` from the branch list.
 
 ## Order
 
