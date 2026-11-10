@@ -8,6 +8,7 @@ package e2e
 // findings are about bytes the server changes.
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -316,4 +317,21 @@ func TestRegressionO23HdrWithoutCurrentArticle(t *testing.T) {
 	c := e.dial()
 	c.ExpectCmd(211, "GROUP local.empty")
 	c.ExpectCmd(420, "HDR Subject")
+	c.ExpectCmd(420, "OVER")
+
+	// A current article cancelled after GROUP selected it is an invalid current article
+	// too; an explicit range only finds the number missing (423).
+	const msgid = "<o23-cancelled@e2e.test>"
+	login(c, user, pass)
+	c.ExpectCmd(340, "POST")
+	c.MustSend(client.Stuff(testArticle(msgid, group)))
+	c.ExpectStatus(240, "POST")
+	c.ExpectCmd(211, "GROUP %s", group)
+	if removed, err := e.Store.CancelMessageID(context.Background(), msgid); err != nil || !removed {
+		t.Fatalf("cancel the current article: %v, %v", removed, err)
+	}
+	c.ExpectCmd(420, "HDR Subject")
+	c.ExpectCmd(423, "HDR Subject 1")
+	c.ExpectCmd(420, "OVER")
+	c.ExpectCmd(423, "OVER 1")
 }
