@@ -9,10 +9,12 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/go-while/nntp-testkit/client"
 	"github.com/go-while/nntp-testkit/conformance"
 )
 
@@ -27,7 +29,18 @@ var authinfoKnownIssues = []string{
 }
 
 func TestConformance(t *testing.T) {
-	addr := startEnv(t).Addr
+	e := startEnv(t)
+	addr := e.Addr
+	// The article checks (ARTICLE/HEAD/BODY/STAT, OVER, HDR, LISTGROUP, NEXT/LAST) skip on an
+	// empty group, so post a few articles first.
+	c := e.dial()
+	login(c, user, pass)
+	for i := 1; i <= 3; i++ {
+		c.ExpectCmd(340, "POST")
+		c.MustSend(client.Stuff(testArticle(fmt.Sprintf("<conformance-seed-%d@e2e.test>", i), group)))
+		c.ExpectStatus(240, "POST seed article")
+	}
+	c.Close()
 	var skip []string
 	if os.Getenv("OUS_E2E_KNOWN_ISSUES") != "1" {
 		skip = authinfoKnownIssues
