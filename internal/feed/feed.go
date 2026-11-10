@@ -229,7 +229,7 @@ func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem, deadline t
 	if !PeerWantsArticle(*peer, view) {
 		return false, fmt.Sprintf("not sent %s -> %s (patterns/flags)", it.MessageID, label), nil
 	}
-	accepted, err = f.deliverArticle(*peer, it.MessageID, wire, deadline)
+	accepted, err = f.deliverArticleBy(*peer, it.MessageID, wire, deadline)
 	if err != nil {
 		return false, "", err
 	}
