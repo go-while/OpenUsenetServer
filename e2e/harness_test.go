@@ -1,0 +1,150 @@
+//go:build e2e
+
+package e2e
+
+// Harness for the e2e tests: a real OpenUsenetServer listener on 127.0.0.1:0 in this process,
+// backed by the in-memory store (no Postgres), and nntp-testkit clients and fake peers.
+//
+// The server module keeps its own unit tests with local helpers (internal/*, Go 1.25, no kit
+// dependency); the tests here are the kit-based counterparts and the regression tests for the
+// findings in ISSUES.md.
+
+import (
+	"context"
+	"net"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-while/nntp-testkit/client"
+
+	"openusenet/internal/auth"
+	"openusenet/internal/config"
+	"openusenet/internal/server"
+	"openusenet/internal/store"
+)
+
+const (
+	group    = "local.test"
+	user     = "e2euser"
+	pass     = "e2e-secret-pass"
+	pathhost = "e2e.test"
+)
+
+// env is one running server with its store.
+type env struct {
+	t     *testing.T
+	Addr  string
+	Store *store.Memory
+	Cfg   config.Config
+	Srv   *server.Server
+}
+
+// option changes the configuration before the server starts.
+type option func(*config.Config)
+
+// startEnv starts a server with group local.test and the posting user e2euser. The load
+// watchdog is off, so a busy test host does not make the server refuse articles (441).
+func startEnv(t *testing.T, opts ...option) *env {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	st := store.NewMemory()
+	e := &env{t: t, Store: st}
+	e.addGroup(group, "y")
+	e.addUser(user, pass, true)
+
+	cfg := config.Defaults()
+	cfg.Server.Hostname = pathhost
+	cfg.Server.Pathhost = pathhost
+	cfg.Listen.NNTP = "127.0.0.1:0"
+	cfg.Listen.HTTP = "-"
+	off := false
+	cfg.Watchdog.Enabled = &off
+	for _, o := range opts {
+		o(&cfg)
+	}
+	e.Cfg = cfg
+	e.Srv = server.New(cfg, st, nil, nil)
+	go func() { _ = e.Srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if a := e.Srv.Addr(); a != nil {
+			e.Addr = a.(*net.TCPAddr).String()
+			return e
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("server did not start listening")
+	return nil
+}
+
+func (e *env) addGroup(name, status string) {
+	e.t.Helper()
+	if err := e.Store.EnsureGroup(context.Background(), name, "e2e group "+name, status); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func (e *env) addUser(name, password string, canPost bool) {
+	e.t.Helper()
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.Store.CreateUser(context.Background(), store.User{Username: name, PasswordHash: hash, Role: store.RoleUser, CanPost: canPost}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// addPeer stores an outgoing feed peer; the feeder reads peers from the store on each offer.
+func (e *env) addPeer(p store.Peer) *store.Peer {
+	e.t.Helper()
+	got, err := e.Store.CreatePeer(context.Background(), p)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return got
+}
+
+// dial connects a strict kit client (greeting read, hang guard set, closed at cleanup).
+func (e *env) dial() *client.Conn {
+	e.t.Helper()
+	return client.Dial(e.t, e.Addr)
+}
+
+// login authenticates c as name/password (381, then 281).
+func login(c *client.Conn, name, password string) {
+	c.ExpectCmd(381, "AUTHINFO USER %s", name)
+	c.ExpectCmd(281, "AUTHINFO PASS %s", password)
+}
+
+// knownIssue skips a test that pins a finding still open on main (ISSUES.md id), unless
+// OUS_E2E_KNOWN_ISSUES=1: then it runs, and fails until the fix is merged. Remove the call
+// when the fix lands.
+func knownIssue(t *testing.T, id, what string) {
+	t.Helper()
+	if os.Getenv("OUS_E2E_KNOWN_ISSUES") != "1" {
+		t.Skipf("known issue %s (%s); set OUS_E2E_KNOWN_ISSUES=1 to run", id, what)
+	}
+}
+
+// testArticle returns an article as CRLF lines without the final line end and without the
+// dot terminator; extra are added header lines ("Name: value"). Send it with client.Stuff
+// (lines) or as raw bytes plus "\r\n.\r\n" when the test needs exact bytes.
+// TODO(nntp-testkit): replace with the kit's article builder once it exists.
+func testArticle(msgid, newsgroups string, extra ...string) []string {
+	h := []string{
+		"Path: e2e-peer!not-for-mail",
+		"From: E2E Tester <e2e@example.invalid>",
+		"Newsgroups: " + newsgroups,
+		"Subject: e2e " + strings.Trim(msgid, "<>"),
+		"Date: " + time.Now().UTC().Format(time.RFC1123Z),
+		"Message-ID: " + msgid,
+	}
+	h = append(h, extra...)
+	return append(h, "", "e2e body line 1", "e2e body line 2")
+}
