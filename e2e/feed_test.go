@@ -127,8 +127,9 @@ func checkArticle(t *testing.T, wire, posted []string) {
 	if got, want := header(gotHead, "Message-ID"), header(wantHead, "Message-ID"); got != want {
 		t.Errorf("Message-ID = %q, want %q", got, want)
 	}
-	if p := header(gotHead, "Path"); !strings.HasPrefix(p, pathhost+"!") {
-		t.Errorf("Path = %q, want it to start with %q", p, pathhost+"!")
+	// The server prepends its own hop and keeps the posted Path behind it.
+	if got, want := header(gotHead, "Path"), pathhost+"!"+header(wantHead, "Path"); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
 	}
 	if !slices.Equal(gotBody, wantBody) {
 		t.Errorf("body = %q, want %q", gotBody, wantBody)
