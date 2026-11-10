@@ -6,7 +6,7 @@
 #   ./merge-train.sh                    # base: abe8543, upstream main when the plan was made
 #   git fetch https://github.com/tgeek77/OpenUsenetServer main && ./merge-train.sh FETCH_HEAD
 #
-# It resets merge-train to the base, so it refuses to run with uncommitted changes or on any
+# It resets merge-train to the base, so it refuses to run with uncommitted or untracked files or on any
 # other branch. Branches the base already contains (merged upstream) are skipped. Stops at the
 # first conflict.
 set -e
@@ -20,8 +20,9 @@ if [ "$(git branch --show-current)" != merge-train ]; then
 	echo "check out branch merge-train in this worktree first" >&2
 	exit 1
 fi
-if ! git diff --quiet || ! git diff --cached --quiet; then
-	echo "uncommitted changes; not resetting merge-train" >&2
+if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+	echo "uncommitted or untracked files; not resetting merge-train" >&2
+	git status --short >&2
 	exit 1
 fi
 base=$(git rev-parse --verify "$BASE^{commit}")
