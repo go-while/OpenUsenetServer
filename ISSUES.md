@@ -75,7 +75,7 @@ answers reader commands with 480).
 | [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open |
 | [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | open (fix: fork branch `fix/hdr-no-current-article`) |
 | [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | open (fix: fork branch `fix/inbound-peer-by-hostname`) |
-| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`) |
+| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`); decision on the snippet for peers without an outgoing password |
 
 ## Details
 
@@ -335,6 +335,15 @@ stored as the peer's outgoing password. Fix: the snippet shows the peer's outgoi
 a random secret created once per peer and stored; `PairPassword` stays, and the portal warns when
 a peer still uses a derived password. Stored passwords are not changed, so existing feeds keep
 working. Verified.
+
+Open question for the maintainer (found by ous-sol's review): for a peer without an outgoing
+password, OUS sends no AUTHINFO, but the snippet still asks the remote side to require a
+password (the derived one before, a random one with the fix), so a remote admin who pastes it
+as is will refuse our feed. Options: (1) show the line commented out (`# password: ...`) with a
+note to set the same value as the peer's outgoing password first; (2) leave the line out until
+an outgoing password is set; (3) prefill the outgoing password in the editor so saving stores it
+(OUS then sends AUTHINFO, which breaks the feed until the remote side has it). Left to the
+maintainer.
 
 ## Checked, not a bug
 
