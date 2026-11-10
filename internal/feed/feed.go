@@ -169,22 +169,37 @@ func (f *Feeder) drainOnce(ctx context.Context) {
 		if time.Until(cutoff) < f.timeout {
 			break
 		}
-		accepted, summary, err := f.deliver(ctx, it, cutoff)
-		if err != nil {
-			f.fail.Add(1)
-			backoff := retryBackoff(it.Attempts)
-			_ = f.arts.FailFeed(ctx, it.ID, err.Error(), backoff)
-			f.last.Store(fmt.Sprintf("error %s -> peer %d: %s", it.MessageID, it.PeerID, err.Error()))
-			f.log.Printf("feed %s peer=%d: %v (retry in %s)", it.MessageID, it.PeerID, err, backoff)
-			continue
-		}
-		_ = f.arts.CompleteFeed(ctx, it.ID)
-		if summary != "" {
-			f.last.Store(summary)
-		}
-		if accepted {
-			f.ok.Add(1)
-		}
+		f.deliverClaimed(ctx, it, cutoff)
+	}
+}
+
+// deliverClaimed delivers one claimed item and reports the result, all before cutoff: the
+// store lookups and the report get a context that ends at cutoff, and once cutoff has
+// passed no result is reported. The item is then left for the next claim (a second offer
+// is refused by the peer as a duplicate, the safe side), instead of completing or
+// rescheduling an item that another process may have claimed again.
+func (f *Feeder) deliverClaimed(ctx context.Context, it store.FeedQueueItem, cutoff time.Time) {
+	ctx, cancel := context.WithDeadline(ctx, cutoff)
+	defer cancel()
+	accepted, summary, err := f.deliver(ctx, it, cutoff)
+	if !time.Now().Before(cutoff) {
+		f.log.Printf("feed %s peer=%d: claim deadline passed, left for the next claim (%v)", it.MessageID, it.PeerID, err)
+		return
+	}
+	if err != nil {
+		f.fail.Add(1)
+		backoff := retryBackoff(it.Attempts)
+		_ = f.arts.FailFeed(ctx, it.ID, err.Error(), backoff)
+		f.last.Store(fmt.Sprintf("error %s -> peer %d: %s", it.MessageID, it.PeerID, err.Error()))
+		f.log.Printf("feed %s peer=%d: %v (retry in %s)", it.MessageID, it.PeerID, err, backoff)
+		return
+	}
+	_ = f.arts.CompleteFeed(ctx, it.ID)
+	if summary != "" {
+		f.last.Store(summary)
+	}
+	if accepted {
+		f.ok.Add(1)
 	}
 }
 
@@ -209,7 +224,7 @@ func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem, deadline t
 		label = peer.Name
 	}
 	if peer == nil || !peer.Enabled {
-		_ = f.arts.CompleteFeed(ctx, it.ID)
+		// deliverClaimed completes the item (before the claim deadline).
 		return false, fmt.Sprintf("not sent %s -> %s (peer disabled)", it.MessageID, label), nil
 	}
 	art, err := f.arts.GetByMsgID(ctx, it.MessageID)

@@ -363,22 +363,137 @@ func TestSlowPeerNoDuplicateOffers(t *testing.T) {
 }
 
 // A peer that never finishes a reply (each line inside the per-step timeout) must not keep a
-// delivery running past the claim lease: the delivery is cut and the item failed in time.
+// delivery running past the claim lease: the delivery is cut before the lease ends, and as
+// the claim deadline has passed by then, nothing is reported; the item waits for the next
+// claim.
 func TestDeliveryCutAtLease(t *testing.T) {
 	const lease = 500 * time.Millisecond
 	p := startPeer(t, 0, true)
 	q := newFakeQueue(p.storePeer(), lease)
 	f := newTestFeeder(q)
-	f.lease, f.timeout, f.tick = lease, 200*time.Millisecond, time.Hour
+	f.lease, f.timeout = lease, 200*time.Millisecond
 
 	const id = "<trickle-1@test>"
 	_ = q.EnqueueFeed(context.Background(), 1, id)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go f.RunWorker(ctx)
-
-	waitFor(t, 3*time.Second, "the delivery to fail", func() bool { return q.failure(id) != "" })
+	start := time.Now()
+	done := make(chan struct{})
+	go func() { f.drain(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the delivery was not cut: drain still running after 3s")
+	}
+	if d := time.Since(start); d >= lease {
+		t.Errorf("drain took %s, want less than the %s lease", d, lease)
+	}
 	for _, l := range q.lateResults() {
 		t.Error(l)
+	}
+	if e := q.failure(id); e != "" {
+		t.Errorf("FailFeed after the claim deadline: %q", e)
+	}
+	if d := q.depth(); d != 1 {
+		t.Errorf("queue depth = %d, want 1 (item left for the next claim)", d)
+	}
+}
+
+// slowLookupQueue answers GetPeer after delay (a stalled store); ctxAware decides whether
+// the lookup gives up when its context ends, as a database query does, or not.
+type slowLookupQueue struct {
+	*fakeQueue
+	delay    time.Duration
+	ctxAware bool
+}
+
+func (s *slowLookupQueue) GetPeer(ctx context.Context, _ int64) (*store.Peer, error) {
+	if !s.ctxAware {
+		time.Sleep(s.delay)
+		return nil, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(s.delay):
+		return nil, nil
+	}
+}
+
+// A slow store lookup must not let the drain report a result (CompleteFeed/FailFeed) after
+// the claim lease ran out: by then another process may have claimed the item again. The item
+// is left for the next claim instead. Adapted from ous-sol's review fixture
+// (TestSolReviewStoreLookupRespectsLease): 100 ms lease, 200 ms lookup, peer missing.
+func TestStoreLookupRespectsLease(t *testing.T) {
+	for _, ctxAware := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ctxAware=%v", ctxAware), func(t *testing.T) {
+			const lease = 100 * time.Millisecond
+			q := newFakeQueue(store.Peer{}, lease)
+			s := &slowLookupQueue{fakeQueue: q, delay: 2 * lease, ctxAware: ctxAware}
+			f := New(config.Config{}, s, s, log.New(io.Discard, "", 0))
+			f.lease, f.timeout = lease, 10*time.Millisecond
+			if err := q.EnqueueFeed(context.Background(), 1, "<slow-store@test>"); err != nil {
+				t.Fatal(err)
+			}
+			f.drain(context.Background())
+			for _, l := range q.lateResults() {
+				t.Error(l)
+			}
+			if d := q.depth(); d != 1 {
+				t.Errorf("queue depth = %d, want 1 (item left for the next claim)", d)
+			}
+		})
+	}
+}
+
+// slowResultQueue reports results after delay (a stalled store) and gives up when the
+// context ends, as a database query does.
+type slowResultQueue struct {
+	*fakeQueue
+	delay   time.Duration
+	failGet bool // GetPeer fails, so the drain reports with FailFeed
+}
+
+func (s *slowResultQueue) GetPeer(context.Context, int64) (*store.Peer, error) {
+	if s.failGet {
+		return nil, fmt.Errorf("lookup failed")
+	}
+	return nil, nil
+}
+
+func (s *slowResultQueue) CompleteFeed(ctx context.Context, id int64) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(s.delay):
+		return s.fakeQueue.CompleteFeed(ctx, id)
+	}
+}
+
+func (s *slowResultQueue) FailFeed(ctx context.Context, id int64, msg string, retry time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(s.delay):
+		return s.fakeQueue.FailFeed(ctx, id, msg, retry)
+	}
+}
+
+// A slow CompleteFeed/FailFeed must give up at the claim deadline, not finish after the
+// lease. Adapted from ous-sol's review fixture (TestSolReviewStoreResultsRespectLease).
+func TestStoreResultsRespectLease(t *testing.T) {
+	for _, failGet := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failGet=%v", failGet), func(t *testing.T) {
+			const lease = 100 * time.Millisecond
+			q := newFakeQueue(store.Peer{}, lease)
+			s := &slowResultQueue{fakeQueue: q, delay: 2 * lease, failGet: failGet}
+			f := New(config.Config{}, s, s, log.New(io.Discard, "", 0))
+			f.lease, f.timeout = lease, 10*time.Millisecond
+			if err := q.EnqueueFeed(context.Background(), 1, "<slow-result@test>"); err != nil {
+				t.Fatal(err)
+			}
+			f.drain(context.Background())
+			for _, l := range q.lateResults() {
+				t.Error(l)
+			}
+		})
 	}
 }
