@@ -38,8 +38,8 @@ func ihaveRaw(c *client.Conn, msgid, art string, want int) string {
 	return c.ExpectStatus(want, "IHAVE "+msgid)
 }
 
-// postRaw posts art (exact bytes, CRLF lines) and expects 340, then want.
-func postRaw(c *client.Conn, art string, want int) string {
+// postArticle posts art (exact bytes, CRLF lines) and expects 340, then want.
+func postArticle(c *client.Conn, art string, want int) string {
 	c.ExpectCmd(340, "POST")
 	c.MustSend(dotStuff(art))
 	return c.ExpectStatus(want, "POST")
@@ -145,7 +145,7 @@ func TestRegressionO15BareCRKept(t *testing.T) {
 
 	login(c, user, pass)
 	msgid = "<o15-post@e2e.test>"
-	postRaw(c, strings.Join([]string{
+	postArticle(c, strings.Join([]string{
 		"From: E2E Tester <e2e@example.invalid>",
 		"Newsgroups: " + group,
 		"Subject: bare CR by POST",
@@ -285,7 +285,7 @@ func TestRegressionO12PostingAccount(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	msgid := "<o12-post@e2e.test>"
-	postRaw(c, strings.Join([]string{
+	postArticle(c, strings.Join([]string{
 		"From: E2E Tester <e2e@example.invalid>",
 		"Newsgroups: " + group,
 		"Subject: posting account",
