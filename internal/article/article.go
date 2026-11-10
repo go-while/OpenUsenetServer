@@ -227,10 +227,15 @@ func headerValue(lines []string, name string) string {
 	return value
 }
 
-// HeaderValue looks up name in a stored head (CRLF-separated lines without
-// the separator line) the way Article.Get does.
+// HeaderValue looks up name in a stored head (lines without the separator
+// line) the way Article.Get does: case-insensitive, continuation lines
+// unfolded. Lines may end in CRLF or LF (older stored heads).
 func HeaderValue(head, name string) string {
-	return headerValue(strings.Split(head, "\r\n"), name)
+	lines := strings.Split(head, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSuffix(l, "\r")
+	}
+	return headerValue(lines, name)
 }
 
 // Get returns the value of the first field named name (case-insensitive),
@@ -460,7 +465,8 @@ func PathContains(path, token string) bool {
 		return false
 	}
 	for _, hop := range strings.Split(path, "!") {
-		if strings.EqualFold(hop, token) {
+		// A folded Path unfolds to "a !b": the white space is not part of the site.
+		if strings.EqualFold(strings.TrimSpace(hop), token) {
 			return true
 		}
 	}
