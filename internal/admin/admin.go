@@ -859,11 +859,17 @@ func (p *Portal) peerDetail(ctx context.Context, peer store.Peer) (map[string]an
 		return nil, err
 	}
 	opts := inn.ExportOpts{RemotePathhost: remote, Password: pass}
-	return map[string]any{
+	out := map[string]any{
 		"peer":     peer,
 		"snippets": inn.Snippets(spec),
 		"our_side": p.ourSideSnippets(opts),
-	}, nil
+	}
+	if peerauth.UsesPairPassword(p.cfg.Server.Pathhost, peer) {
+		out["password_warning"] = "This peer still uses a password from the old algorithm, " +
+			"derived from the two path hostnames, which anyone can compute. Set a new random " +
+			"password here and on the peer's side."
+	}
+	return out, nil
 }
 
 // peerSnippetPassword is the password the incoming.conf snippet asks the remote peer to

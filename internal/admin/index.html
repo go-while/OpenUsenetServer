@@ -1459,6 +1459,7 @@ async function openPeerModal(id) {
     peerSnippets = d.snippets || {};
     if (d.our_side) peerOurSide = d.our_side;
     fillPeerForm(d.peer);
+    $("pmsg").textContent = d.password_warning || "";
     $("pdelete").classList.remove("hidden");
   } else {
     $("peertitle").textContent = "New peer";
@@ -1518,6 +1519,7 @@ $("psave").onclick = async () => {
     } else {
       $("pmsg").textContent = "saved";
     }
+    if (d.password_warning) $("pmsg").textContent += " — " + d.password_warning;
     $("pdelete").classList.remove("hidden");
     await loadStatus();
   } catch (e) { $("pmsg").textContent = e.message; }
