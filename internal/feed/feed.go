@@ -38,6 +38,10 @@ type Feeder struct {
 	arts    ArticleSource
 	log     *log.Logger
 	timeout time.Duration
+	tick    time.Duration // worker drain interval
+	lease   time.Duration // claim lease of ClaimFeedDue (store: 2 minutes)
+	running atomic.Bool   // a drain is running (one at a time, O-20)
+	pending atomic.Bool   // a drain was requested; the running one goes once more
 	offered atomic.Int64
 	ok      atomic.Int64
 	fail    atomic.Int64
@@ -48,7 +52,8 @@ func New(cfg config.Config, peers PeerSource, arts ArticleSource, lg *log.Logger
 	if lg == nil {
 		lg = log.Default()
 	}
-	return &Feeder{cfg: cfg, peers: peers, arts: arts, log: lg, timeout: 15 * time.Second}
+	return &Feeder{cfg: cfg, peers: peers, arts: arts, log: lg, timeout: 15 * time.Second,
+		tick: 5 * time.Second, lease: 2 * time.Minute}
 }
 
 // Offer enqueues the article for peers whose Path/patterns/flags allow it.
@@ -90,7 +95,7 @@ func (f *Feeder) Offer(msgid, path string, groups []string, wire []byte) {
 		}
 		f.offered.Add(1)
 	}
-	go f.drainOnce(context.Background())
+	go f.drain(context.Background())
 }
 
 func (f *Feeder) groupStatus(ctx context.Context, groups []string) map[string]string {
@@ -113,10 +118,10 @@ func (f *Feeder) RunWorker(ctx context.Context) {
 	if f == nil || f.arts == nil {
 		return
 	}
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(f.tick)
 	defer t.Stop()
 	for {
-		f.drainOnce(ctx)
+		f.drain(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -125,14 +130,46 @@ func (f *Feeder) RunWorker(ctx context.Context) {
 	}
 }
 
+// drain runs drainOnce unless a drain is already running. Only one drain runs at a time
+// (O-20: every Offer used to start its own drain, each with its own connections, and
+// overlapping drains re-claimed each other's items once the lease ran out, O-21). A request
+// that arrives while a drain runs is not lost: it sets pending, and the running drain goes
+// once more before it returns.
+func (f *Feeder) drain(ctx context.Context) {
+	f.pending.Store(true)
+	for f.running.CompareAndSwap(false, true) {
+		for ctx.Err() == nil && f.pending.Swap(false) {
+			f.drainOnce(ctx)
+		}
+		f.running.Store(false)
+		// A request that came after the last Swap but before running was cleared saw a
+		// running drain and returned; pick it up here (unless another drain already did).
+		// A cancelled ctx leaves it pending for the next drain.
+		if ctx.Err() != nil || !f.pending.Load() {
+			return
+		}
+	}
+}
+
 func (f *Feeder) drainOnce(ctx context.Context) {
+	// The store leases claimed items for f.lease from its own clock; taking the time
+	// before the claim keeps this estimate at or before the store's lease end.
+	claimed := time.Now()
 	items, err := f.arts.ClaimFeedDue(ctx, 32)
 	if err != nil {
 		f.log.Printf("feed claim: %v", err)
 		return
 	}
+	// No item may still be in delivery when its lease runs out, or a drain elsewhere
+	// (another process on the same queue) could claim and send it again (O-21). Each
+	// delivery is cut at cutoff, and once less than one step timeout is left the batch
+	// stops; the rest stays claimed and is due again when the lease ends.
+	cutoff := claimed.Add(f.lease - f.lease/8)
 	for _, it := range items {
-		accepted, summary, err := f.deliver(ctx, it)
+		if time.Until(cutoff) < f.timeout {
+			break
+		}
+		accepted, summary, err := f.deliver(ctx, it, cutoff)
 		if err != nil {
 			f.fail.Add(1)
 			backoff := retryBackoff(it.Attempts)
@@ -162,7 +199,7 @@ func retryBackoff(attempts int) time.Duration {
 	return d
 }
 
-func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem) (accepted bool, summary string, err error) {
+func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem, deadline time.Time) (accepted bool, summary string, err error) {
 	peer, err := f.arts.GetPeer(ctx, it.PeerID)
 	if err != nil {
 		return false, "", err
@@ -192,7 +229,7 @@ func (f *Feeder) deliver(ctx context.Context, it store.FeedQueueItem) (accepted 
 	if !PeerWantsArticle(*peer, view) {
 		return false, fmt.Sprintf("not sent %s -> %s (patterns/flags)", it.MessageID, label), nil
 	}
-	accepted, err = f.deliverArticle(*peer, it.MessageID, wire)
+	accepted, err = f.deliverArticle(*peer, it.MessageID, wire, deadline)
 	if err != nil {
 		return false, "", err
 	}
