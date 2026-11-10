@@ -1,10 +1,13 @@
 #!/bin/sh
 # Rebuild branch merge-train: a base (upstream main) plus every fix branch merged in the planned
-# order (MERGE-PLAN.md). Run it in a worktree that has branch merge-train checked out:
+# order (MERGE-PLAN.md). The script lives on branch dev-gw, which merge-train does not contain:
+# run it by path from a worktree that has merge-train checked out (do not copy it in there,
+# an untracked copy makes the clean-tree check refuse):
 #
 #   git worktree add ../merge-train merge-train && cd ../merge-train
-#   ./merge-train.sh                    # base: abe8543, upstream main when the plan was made
-#   git fetch https://github.com/tgeek77/OpenUsenetServer main && ./merge-train.sh FETCH_HEAD
+#   sh ../OpenUsenetServer/merge-train.sh            # base abe8543, upstream main of the plan
+#   git fetch https://github.com/tgeek77/OpenUsenetServer main
+#   sh ../OpenUsenetServer/merge-train.sh FETCH_HEAD # after an upstream merge
 #
 # It resets merge-train to the base, so it refuses to run with uncommitted or untracked files or on any
 # other branch. Branches the base already contains (merged upstream) are skipped. Stops at the

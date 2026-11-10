@@ -26,7 +26,7 @@ earlier ones land.
 - **Review:** each branch was written by one agent and reviewed by another (ous-sol, GPT-6.1
   Sol); review findings were fixed on the branch and re-checked.
 
-`merge-train.sh` on the fork's `dev-gw` branch rebuilds `merge-train` from the branch list.
+`merge-train.sh` on the fork's `dev-gw` branch rebuilds `merge-train` from the branch list (run it by path from a `merge-train` worktree; usage in the script).
 
 ## Order
 
@@ -75,4 +75,4 @@ and resolve 14 the same way. After 15, `article.OverviewLine` has no caller outs
 - Remove the `knownIssue(...)` call of the merged finding in the fork's `e2e/` tests, so the
   test runs by default.
 - Update ISSUES.md: status **fixed (#PR)**.
-- Rebuild `merge-train` on the new upstream `main` (`git fetch https://github.com/tgeek77/OpenUsenetServer main && ./merge-train.sh FETCH_HEAD`; merged branches are skipped) and rerun the checks above before filing the next PR. If Jason squashes or rebases a PR, the branches after it may need a rebase; the script stops at the first conflict.
+- Rebuild `merge-train` on the new upstream `main` (in a `merge-train` worktree: `git fetch https://github.com/tgeek77/OpenUsenetServer main && sh <dev-gw checkout>/merge-train.sh FETCH_HEAD`; merged branches are skipped) and rerun the checks above before filing the next PR. If Jason squashes or rebases a PR, the branches after it may need a rebase; the script stops at the first conflict.
