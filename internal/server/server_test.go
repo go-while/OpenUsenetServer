@@ -129,3 +129,61 @@ func TestPOSTFeedsIHAVE(t *testing.T) {
 	}
 	t.Fatalf("news-b did not receive %s", msgid)
 }
+
+// A peer configured by hostname is admitted through a forward DNS match, but its group
+// patterns were only applied when the connecting IP equalled a configured host field as text,
+// so a hostname peer could feed any group. Its patterns apply now.
+func TestHostnamePeerPatternsApply(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := store.NewMemory()
+	for _, g := range []string{"local.test", "alt.test"} {
+		if err := st.EnsureGroup(ctx, g, "test group", "y"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.CreatePeer(ctx, store.Peer{Name: "hostpeer", Host: "localhost", Port: 1, Patterns: "local.*", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.Server.Hostname = "news-a"
+	cfg.Server.Pathhost = "news-a"
+	cfg.Listen.NNTP = "127.0.0.1:0"
+	cfg.Listen.HTTP = "-"
+	closed := false
+	cfg.Inbound.Open = &closed // admission by the peer's host only
+	srv := server.New(cfg, st, nil, nil)
+	go func() { _ = srv.ListenAndServe(ctx) }()
+	addr := waitAddr(t, srv)
+
+	c, err := net.Dial("tcp", addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	r := bufio.NewReader(c)
+	if greet, err := r.ReadString('\n'); err != nil || !strings.HasPrefix(greet, "200 ") {
+		t.Fatalf("greeting %q %v", greet, err)
+	}
+	ihave := func(msgid, group, want string) {
+		t.Helper()
+		if _, err := c.Write([]byte("IHAVE " + msgid + "\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		if line, err := r.ReadString('\n'); err != nil || !strings.HasPrefix(line, "335 ") {
+			t.Fatalf("IHAVE %s: %q %v", msgid, line, err)
+		}
+		art := "Path: hostpeer!not-for-mail\r\nFrom: a@b.example\r\nNewsgroups: " + group +
+			"\r\nSubject: s\r\nDate: " + time.Now().UTC().Format(time.RFC1123Z) +
+			"\r\nMessage-ID: " + msgid + "\r\n\r\nbody\r\n.\r\n"
+		if _, err := c.Write([]byte(art)); err != nil {
+			t.Fatal(err)
+		}
+		if line, err := r.ReadString('\n'); err != nil || !strings.HasPrefix(line, want) {
+			t.Fatalf("article to %s: %q %v, want %s...", group, line, err, want)
+		}
+	}
+	ihave("<wanted@hostpeer.example>", "local.test", "235 ")
+	ihave("<unwanted@hostpeer.example>", "alt.test", "437 ")
+}
