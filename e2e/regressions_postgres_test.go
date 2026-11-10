@@ -120,38 +120,64 @@ func TestRegressionO13EightBitArticlesPostgres(t *testing.T) {
 		"latin1": "caf\xe9 noir, na\xefve, \xe0 la carte\r\n",
 		"nul":    "before\x00after\r\n",
 	}
+	// The headers column was TEXT too: the Latin-1 case also carries an 8-bit header line,
+	// which must come back from HEAD unchanged. (No NUL in a header: Parse refuses that.)
+	extra := map[string]string{
+		"latin1": "X-Octets: caf\xe9 \xe0 la carte",
+	}
+	checkHead := func(msgid, how, name string) {
+		t.Helper()
+		x := extra[name]
+		if x == "" {
+			return
+		}
+		if head := rawBlock(c, 221, "HEAD "+msgid); !strings.Contains(head, "\r\n"+x+"\r\n") {
+			t.Errorf("HEAD %s (%s) lost the 8-bit header %q:\n%q", msgid, how, x, head)
+		}
+	}
 	for _, name := range []string{"latin1", "nul"} {
 		body := bodies[name]
+		var xh []string
+		if x := extra[name]; x != "" {
+			xh = []string{x}
+		}
 
 		msgid := "<o13-ihave-" + name + "@e2e.test>"
-		head := strings.Join([]string{
+		head := strings.Join(append([]string{
 			"Path: e2e-peer!not-for-mail",
 			"From: E2E Tester <e2e@example.invalid>",
 			"Newsgroups: " + group,
 			"Subject: 8-bit by IHAVE (" + name + ")",
 			"Date: " + nowDate(),
 			"Message-ID: " + msgid,
-		}, "\r\n") + "\r\n"
+		}, xh...), "\r\n") + "\r\n"
 		c.ExpectCmd(335, "IHAVE %s", msgid)
 		c.MustSend(dotStuff(head + "\r\n" + body))
 		if line := readStatus(t, c); !strings.HasPrefix(line, "235 ") {
 			t.Errorf("IHAVE %s: %q, want 235", msgid, line)
-		} else if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
-			t.Errorf("BODY %s (IHAVE)\n got %q\nwant %q", msgid, got, want)
+		} else {
+			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+				t.Errorf("BODY %s (IHAVE)\n got %q\nwant %q", msgid, got, want)
+			}
+			checkHead(msgid, "IHAVE", name)
 		}
 
 		msgid = "<o13-post-" + name + "@e2e.test>"
 		c.ExpectCmd(340, "POST")
-		c.MustSend(dotStuff(strings.Join([]string{
+		post := append([]string{
 			"From: E2E Tester <e2e@example.invalid>",
 			"Newsgroups: " + group,
 			"Subject: 8-bit by POST (" + name + ")",
 			"Message-ID: " + msgid,
-			"", body}, "\r\n")))
+		}, xh...)
+		c.MustSend(dotStuff(strings.Join(append(post, "", body), "\r\n")))
 		if line := readStatus(t, c); !strings.HasPrefix(line, "240 ") {
 			t.Errorf("POST %s: %q, want 240", msgid, line)
-		} else if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
-			t.Errorf("BODY %s (POST)\n got %q\nwant %q", msgid, got, want)
+		} else {
+			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+				t.Errorf("BODY %s (POST)\n got %q\nwant %q", msgid, got, want)
+			}
+			checkHead(msgid, "POST", name)
 		}
 	}
 }
