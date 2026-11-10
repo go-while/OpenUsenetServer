@@ -400,12 +400,12 @@ func heldPeer(g *gate, inner func(*fakeserver.Conn)) func(*fakeserver.Conn) {
 	}
 }
 
-// feed-parallel: every accepted article starts its own drain goroutine, so the connections to
+// O-20: every accepted article starts its own drain goroutine, so the connections to
 // one peer run in parallel without a limit. With every connection held open until the test
 // releases it (without the hold, short connections hardly overlap and the bound proves
 // nothing), MaxOpen must stay at a small bound.
 func TestFeedParallelBound(t *testing.T) {
-	knownIssue(t, "feed-parallel", "unbounded parallel feeder connections to one peer")
+	knownIssue(t, "O-20", "unbounded parallel feeder connections to one peer")
 	e := startEnv(t)
 	g := newGate()
 	srv := fakeserver.New(t, fakeserver.Options{
@@ -419,7 +419,7 @@ func TestFeedParallelBound(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	for i := range n {
-		post(c, testArticle(fmt.Sprintf("<feed-parallel-%d@e2e.test>", i), group))
+		post(c, testArticle(fmt.Sprintf("<feed-o20-%d@e2e.test>", i), group))
 	}
 	// Hold the connections until more than bound are open, or for a hold window when a
 	// bounded feeder never opens that many. The window is not an assertion (a bounded feeder
@@ -452,15 +452,15 @@ func delayedPeer(d time.Duration, inner func(*fakeserver.Conn)) func(*fakeserver
 	}
 }
 
-// feed-lease: a drain claims up to 32 items with a 2-minute lease and delivers them one after
+// O-21: a drain claims up to 32 items with a 2-minute lease and delivers them one after
 // the other. A batch slower than the lease is claimed again by the worker's next drain, and
 // the same articles are sent twice. One article to 30 peers puts 30 items into one claim; each
 // peer greets after 5 s, so the batch takes about 150 s. Each peer must be offered the
 // article exactly once.
 func TestFeedLeaseNoDuplicates(t *testing.T) {
-	knownIssue(t, "feed-lease", "a batch slower than the 2-minute claim lease is sent twice")
+	knownIssue(t, "O-21", "a batch slower than the 2-minute claim lease is sent twice")
 	if os.Getenv("OUS_E2E_SLOW") != "1" {
-		t.Skip("feed-lease needs about 3 minutes (the 2-minute claim lease is hardcoded); set OUS_E2E_SLOW=1 to run (and go test -timeout 15m)")
+		t.Skip("O-21 needs about 3 minutes (the 2-minute claim lease is hardcoded); set OUS_E2E_SLOW=1 to run (and go test -timeout 15m)")
 	}
 	e := startEnv(t)
 	const peers, delay = 30, 5 * time.Second
@@ -476,7 +476,7 @@ func TestFeedLeaseNoDuplicates(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	const id = "<feed-lease-1@e2e.test>"
+	const id = "<feed-o21-1@e2e.test>"
 	post(c, testArticle(id, group))
 
 	slow := max(testkit.Deadline(), 8*time.Minute)

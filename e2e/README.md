@@ -37,7 +37,7 @@ Without any of them the suite passes on `main`.
 | `reader_test.go`, `post_test.go` | greeting and CAPABILITIES, unknown commands, GROUP/LIST/ARTICLE/STAT/OVER, pipelining, POST without From |
 | `transit_test.go` | IHAVE, CHECK/TAKETHIS, duplicates, Path loops, banned groups, denied peers, peer authentication, newgroup control, moderated groups, two servers feeding each other |
 | `regressions_test.go`, `regressions_postgres_test.go` | one test per finding (O-05, O-06, O-11, O-12, O-13, O-15, O-16, O-19), each a known issue until its fix branch is merged |
-| `feed_test.go` | the outgoing feeder against nntp-testkit's fake peer: streaming, IHAVE fallback, Path and pattern exclusion, articles the peer has; known issues O-17, O-18, unbounded parallel connections, resends after the claim lease |
+| `feed_test.go` | the outgoing feeder against nntp-testkit's fake peer: streaming, IHAVE fallback, Path and pattern exclusion, articles the peer has; known issues O-17, O-18, O-20 (unbounded parallel connections), O-21 (resends after the claim lease) |
 | `interop/` | lab scripts from the INN and Diablo interop rounds (not run by `go test`) |
 
 ## Writing tests
