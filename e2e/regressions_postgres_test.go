@@ -5,7 +5,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -17,7 +16,6 @@ import (
 
 	"openusenet/internal/auth"
 	"openusenet/internal/config"
-	"openusenet/internal/server"
 	"openusenet/internal/store"
 )
 
@@ -79,13 +77,10 @@ func startPostgresEnv(t *testing.T) string {
 	cfg := config.Defaults()
 	cfg.Server.Hostname = pathhost
 	cfg.Server.Pathhost = pathhost
-	cfg.Listen.NNTP = "127.0.0.1:0"
 	cfg.Listen.HTTP = "-"
 	off := false
 	cfg.Watchdog.Enabled = &off
-	srv := server.New(cfg, st, nil, nil)
-	done := make(chan struct{})
-	go func() { _ = srv.ListenAndServe(ctx); close(done) }()
+	addr, _, done := serve(t, ctx, &cfg, st)
 	// Stop the server before the store closes (cleanups run last in, first out).
 	t.Cleanup(func() {
 		cancel()
@@ -94,16 +89,7 @@ func startPostgresEnv(t *testing.T) string {
 		case <-time.After(5 * time.Second):
 		}
 	})
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if a := srv.Addr(); a != nil {
-			return a.(*net.TCPAddr).String()
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("server did not start listening")
-	return ""
+	return addr
 }
 
 // O-13: the articles table kept headers and body as PostgreSQL TEXT, which refuses bytes that

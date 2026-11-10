@@ -13,10 +13,12 @@ import (
 	"context"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	testkit "github.com/go-while/nntp-testkit"
 	"github.com/go-while/nntp-testkit/client"
 
 	"openusenet/internal/auth"
@@ -66,20 +68,45 @@ func startEnv(t *testing.T, opts ...option) *env {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	e.Addr, e.Srv, _ = serve(t, ctx, &cfg, st)
 	e.Cfg = cfg
-	e.Srv = server.New(cfg, st, nil, nil)
-	go func() { _ = e.Srv.ListenAndServe(ctx) }()
+	return e
+}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if a := e.Srv.Addr(); a != nil {
-			e.Addr = a.(*net.TCPAddr).String()
-			return e
+// serve starts srv on a free port of 127.0.0.1 and returns its address once it accepts
+// connections, and a channel closed when ListenAndServe returns. It does not poll
+// server.Addr(): ListenAndServe stores its listener without synchronisation, so reading it
+// from the test goroutine is a data race (go test -race reports it). A port taken between
+// FreePort and the server's listen makes ListenAndServe fail at once; then it tries another.
+func serve(t *testing.T, ctx context.Context, cfg *config.Config, st store.Store) (string, *server.Server, <-chan struct{}) {
+	t.Helper()
+	var lastErr error
+	for range 5 {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(testkit.FreePort(t)))
+		cfg.Listen.NNTP = addr
+		srv := server.New(*cfg, st, nil, nil)
+		errc := make(chan error, 1)
+		done := make(chan struct{})
+		go func() { errc <- srv.ListenAndServe(ctx); close(done) }()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			select {
+			case lastErr = <-errc:
+			default:
+				if testkit.Listening(addr) {
+					return addr, srv, done
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("server did not start listening on %s", addr)
+				}
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			break
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("server did not start listening")
-	return nil
+	t.Fatalf("server did not start: %v", lastErr)
+	return "", nil, nil
 }
 
 func (e *env) addGroup(name, status string) {
