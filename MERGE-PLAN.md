@@ -1,7 +1,8 @@
 # Merge plan for the fork's fixes
 
 Every fix is its own branch on [go-while/OpenUsenetServer](https://github.com/go-while/OpenUsenetServer),
-based on upstream `main` at `abe8543`, with its own tests. This file is the planned order for
+based on upstream `main` at `abe8543` (except `fix/over-msgid-bytes-on-kab`, which sits on
+`fix/keep-article-bytes` on purpose, see below), with its own tests. This file is the planned order for
 upstream pull requests and what was checked. Findings: [ISSUES.md](ISSUES.md).
 
 Only three pull requests are open upstream (#2, #3, #4); the rest are filed one at a time as
@@ -18,7 +19,7 @@ earlier ones land.
 - **Integration:** branch `merge-train` is `main` plus all 16 branches merged in the order below,
   without a conflict. On it: `go build`, `go vet ./...` (clean, O-14 included), `go test ./...`
   and `go test -race ./...` pass.
-- **e2e:** `merge-train` plus the fork's `e2e/` suite (nntp-testkit, 31 tests), with
+- **e2e:** `merge-train` plus the fork's `e2e/` suite (nntp-testkit, 36 tests), with
   `OUS_E2E_KNOWN_ISSUES=1 OUS_E2E_SLOW=1`: everything passes, including all regression tests and
   the 41 conformance checks, except O-17 (a design question, not in this plan). O-13 needs
   PostgreSQL and was verified separately on PostgreSQL 16.
