@@ -201,18 +201,26 @@ func (p *drainPeer) accept() {
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
+			// release lowers the open count once: before the 205 reply to QUIT (the client
+			// may connect again as soon as it reads it), or when the connection ends.
+			var once sync.Once
+			release := func() {
+				once.Do(func() {
+					p.mu.Lock()
+					p.open--
+					p.mu.Unlock()
+				})
+			}
 			defer func() {
 				_ = c.Close()
-				p.mu.Lock()
-				p.open--
-				p.mu.Unlock()
+				release()
 			}()
-			p.serve(c)
+			p.serve(c, release)
 		}()
 	}
 }
 
-func (p *drainPeer) serve(c net.Conn) {
+func (p *drainPeer) serve(c net.Conn, release func()) {
 	go func() { <-p.closing; _ = c.Close() }()
 	select {
 	case <-time.After(p.greetDelay):
@@ -260,6 +268,7 @@ func (p *drainPeer) serve(c net.Conn) {
 			p.mu.Unlock()
 			w("239 " + arg)
 		case "QUIT":
+			release()
 			w("205 bye")
 			return
 		default:
