@@ -152,6 +152,8 @@ func TestHostnamePeerPatternsApply(t *testing.T) {
 	cfg.Listen.HTTP = "-"
 	closed := false
 	cfg.Inbound.Open = &closed // admission by the peer's host only
+	off := false
+	cfg.Watchdog.Enabled = &off // a busy test host must not refuse the article (436/441)
 	srv := server.New(cfg, st, nil, nil)
 	go func() { _ = srv.ListenAndServe(ctx) }()
 	addr := waitAddr(t, srv)
