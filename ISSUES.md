@@ -22,7 +22,7 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 
 | Run | Tool | Result |
 |---|---|---|
-| Conformance, in-process | `e2e/conformance_test.go` (`make e2e`; on the fork's `dev-gw`, not in `main` yet), nntp-testkit v0.11.2, memory store | 30 pass, 4 fail, 7 skip (empty group) |
+| Conformance, in-process | `e2e/conformance_test.go` (`make e2e`; on the fork's `dev-gw`, not in `main` yet), nntp-testkit v0.11.2, memory store | 30 pass, 4 fail, 7 skip (empty group); with a seeded group 37 pass, 4 fail (the AUTHINFO checks) |
 | Conformance, live | `nntp-conformance` v0.11.2 against `openusenet serve` with PostgreSQL | 1st pass 30/4/7, 2nd pass 37 pass, 4 fail, 0 skip |
 | pynntp integration tests | pynntp `main` + portable tests (greenbender/pynntp#144), anonymous | 4 pass, 22 fail, 8 skip; one server-side failure (O-01), the rest pynntp or test assumptions |
 | Diablo feed interop | Diablo `dnewslink`, 5 articles per mode, then resent | streaming and IHAVE work; duplicates get 438/435; one finding (O-05) |
@@ -31,6 +31,8 @@ the PR that fixed it), **decision** (needs the maintainer to decide), **won't fi
 | usenet_archiver real-server test | 16 tricky articles each by POST and IHAVE, pulled back 4 times with the archiver (run r20261109T150600-188e36) | 30 of 32 accepted; archiver side exact; two new findings (O-15, O-16), O-13 on POST, O-05 and O-12 seen again |
 | INN interop | INN 2.8.0 prerelease (upstream `main` 4c5218607): innfeed -> OUS, OUS -> innd (streaming), 5 posts each way compared article by article; nntp-testkit against INN (`innd` and `nnrpd`) | both directions work, nothing loops; INN keeps heads byte-exact and writes Xref, OUS does not (O-05, O-10); no new findings |
 | Diablo interop, OUS feeding | Diablo `main` 5f3a3cc: OUS peer on Diablo's streaming port and on an IHAVE-only proxy, 3 posts each, read back from Diablo's reader | all 6 arrive with body and head identical to what OUS serves; findings O-17, O-18 |
+| e2e suite (fork `dev-gw`) | `e2e/` with nntp-testkit v0.11.2: 31 tests (reader, POST, transit, moderation, feeder against fake peers, one regression test per finding), in-process server, memory store; O-13 on PostgreSQL 16 | all pass on `main` with known issues skipped; each regression test fails on `main` and passes with its fix branch; conformance 37 pass, 0 fail with a seeded group (the four AUTHINFO checks skipped as known); findings O-20 to O-22 |
+| Conformance preview | nntp-testkit `main` 4c1bc74 (7 more reader checks, before v0.12.0) against `dev-gw`, seeded group | 43 pass, 1 fail: O-23 |
 
 ## Conformance side by side
 
@@ -68,6 +70,10 @@ answers reader commands with 480).
 | [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open |
 | [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open |
 | [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
+| [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open |
+| [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | open |
+| [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open |
+| [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | open (fix: fork branch `fix/hdr-no-current-article`) |
 
 ## Details
 
@@ -262,6 +268,45 @@ sends `340 send article to be posted`. The client got its 480 and goes on with, 
 hangs or goes out of sync. The IHAVE path already avoids this with `replied()`. Verified (found
 by the agent writing the O-01 to O-04 fix, whose test hung on it; reproduced with a unit test
 that times out without the fix).
+
+### O-20 Parallel feed connections without a limit
+`Offer` (`internal/feed/feed.go:93`) starts `go f.drainOnce(...)` for every accepted article, in
+addition to the worker that drains every 5 seconds (`RunWorker`, `feed.go:112`). Each drain
+claims what is due and delivers it with one connection per article (O-17), so a burst of
+articles opens as many connections to the same peer at once, with no per-peer limit. Peers cap
+connections per peer (INN's `max-connections`, Diablo's `maxconnect`) and refuse the rest,
+which then go back into the queue. Verified with a fake peer: 20 articles gave 20 connections,
+6 at once; with every connection held open, 16 of 16 were open at the same time
+(e2e `TestFeedParallelBound`, a known issue). Belongs with O-17: a persistent feeder per peer
+fixes both.
+
+### O-21 A slow peer gets articles twice
+`ClaimFeedDue` marks claimed items due again after 2 minutes
+(`internal/store/postgres_ops.go:176`, memory store `memory.go:1118`), but `drainOnce`
+(`feed.go:128`) delivers its up to 32 items one after the other, each with a 15-second timeout
+per step (`feed.go:51`). Against a slow or unreachable peer a batch takes longer than 2 minutes,
+and the next drain (the 5-second worker, or any new article) claims the rest again, so the same
+articles are offered over a second connection at the same time. Nothing is lost (the peer
+refuses duplicates), but it doubles the traffic exactly when the peer is struggling. Verified
+with a fake peer that greets after 5 seconds: 30 queued items gave 36 connections, 6 articles
+offered twice (e2e `TestFeedLeaseNoDuplicates`, a known issue, needs `OUS_E2E_SLOW=1`).
+
+### O-22 The listener is published without synchronisation
+`ListenAndServe` stores the listener in `s.ln` (`internal/server/server.go:93`) while
+`Addr()` (`server.go:360`) reads it from other goroutines, with no lock or atomic. Tests that
+start a server and poll `Addr()` (upstream's `internal/server/server_test.go`, and the fork's
+e2e harness until it stopped doing so) are data races; `go test -race` reports them. In
+production nothing calls `Addr()` concurrently, so this is a test-visible bug. Fix: an
+`atomic.Pointer` or a mutex around `s.ln`. Verified (`go test -race`, found by ous-sol).
+
+### O-23 HDR and OVER without a range answer 423, not 420
+Without a range, HDR (RFC 3977 section 8.5.2) and OVER (8.3.2) are about the current article,
+and an invalid current article gets 420. `cmdHdr` (`internal/nntp/session.go:554`) uses the
+current number as the range, so in a group without a current article (number 0) it answers
+`423 no articles in that range`. Both `cmdHdr` and `cmdOver` (`session.go:507`) also answer 423
+when the current article was cancelled or expired after GROUP selected it. Verified; found by
+nntp-testkit's new no-current-article check (kit `main`, before v0.12.0), the expired case by
+ous-sol's review.
 
 ## Checked, not a bug
 
