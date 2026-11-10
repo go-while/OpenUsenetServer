@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"openusenet/internal/admin"
@@ -29,7 +30,7 @@ type Server struct {
 	cfg     config.Config
 	st      store.Store
 	mbox    *archive.MBox
-	ln      net.Listener
+	ln      atomic.Pointer[net.Listener]
 	httpLn  net.Listener
 	log     *log.Logger
 	feeder  *feed.Feeder
@@ -90,7 +91,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
-	s.ln = ln
+	s.ln.Store(&ln)
 	s.log.Printf("nntp listening on %s (hostname %s)", ln.Addr(), s.cfg.Server.Hostname)
 	go func() {
 		<-ctx.Done()
@@ -357,11 +358,14 @@ func (s *Server) runExpireSchedule(ctx context.Context) {
 	}
 }
 
+// Addr returns the NNTP listener address, or nil until ListenAndServe is
+// listening. It is safe to call from any goroutine.
 func (s *Server) Addr() net.Addr {
-	if s.ln == nil {
+	ln := s.ln.Load()
+	if ln == nil {
 		return nil
 	}
-	return s.ln.Addr()
+	return (*ln).Addr()
 }
 
 // SeedPeers copies YAML peers into an empty peers table.
