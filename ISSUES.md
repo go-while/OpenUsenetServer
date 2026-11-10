@@ -15,6 +15,8 @@ Line numbers refer to `main` at `abe8543` unless stated otherwise. "Verified" me
 against the code by reading it; "reported" means a test or a user reported it and it has not
 been reproduced or checked yet.
 
+The planned merge order of the fix branches is in [MERGE-PLAN.md](MERGE-PLAN.md).
+
 Status values: **open**, **PR** (fix waiting for review, with its number), **fixed** (with
 the PR that fixed it), **decision** (needs the maintainer to decide), **won't fix**.
 
@@ -68,14 +70,15 @@ answers reader commands with 480).
 | [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open |
-| [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open |
+| [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open (fix: fork branch `fix/mode-stream-fallback`) |
 | [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
-| [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open |
-| [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | open |
-| [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open |
+| [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open (fix: fork branch `fix/feed-single-drain`) |
+| [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | open (fix: fork branch `fix/feed-single-drain`) |
+| [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open (fix: fork branch `fix/listener-race`) |
 | [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | open (fix: fork branch `fix/hdr-no-current-article`) |
 | [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | open (fix: fork branch `fix/inbound-peer-by-hostname`) |
 | [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`); decision on the snippet for peers without an outgoing password |
+| [O-26](#o-26-a-new-archive-job-is-encoded-while-it-is-being-updated) | Low | A new archive import or export job is returned and encoded as JSON while its goroutine updates it: a data race (`go test -race`) | open (fix: fork branch `fix/import-job-race`) |
 
 ## Details
 
@@ -344,6 +347,15 @@ note to set the same value as the peer's outgoing password first; (2) leave the 
 an outgoing password is set; (3) prefill the outgoing password in the editor so saving stores it
 (OUS then sends AUTHINFO, which breaks the feed until the remote side has it). Left to the
 maintainer.
+
+### O-26 A new archive job is encoded while it is being updated
+`startImportJob` and `startArchiveJob` (`internal/admin/admin.go:1130`, `:1159`) store a new job,
+start the goroutine that fills in its result under `jobsMu`, and return the same pointer; the
+handler encodes it as JSON without the lock (`admin.go:1096`). `go test -race` reports 9 data
+races in `TestArchiveImportAPI` on `main`, and a status reply can be torn when a small import
+finishes at once. The job list (`archiveJobs`) already copies under the lock. Fix: return a copy
+taken under the lock. Verified (`go test -race`, found while running the race detector on the
+integration of all fix branches).
 
 ## Checked, not a bug
 
