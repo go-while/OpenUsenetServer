@@ -41,9 +41,9 @@ earlier ones land.
 | 7 | `fix/posting-account` | `87e09c3` | O-12 posting-account | 7 files, +137/-15 | small, touches posting and the web reader |
 | 8 | `fix/listener-race` | `d95499d` | O-22 listener data race | +8/-4 | small |
 | 9 | `fix/import-job-race` | `6e79e9d` | O-26 archive job data race | 2 files, +61/-2 | small |
-| 10 | `fix/inbound-peer-by-hostname` | `18482ce` | O-24 hostname peers bypass patterns | +65/-7 | small, Medium |
+| 10 | `fix/inbound-peer-by-hostname` | `0956037` | O-24 hostname peers bypass patterns | +67/-7 | small, Medium |
 | 11 | `fix/mode-stream-fallback` | `0527278` | O-18 MODE STREAM fallback | +206/-2 | feeder, independent of 12 |
-| 12 | `fix/feed-single-drain` | `4077ae9` | O-20, O-21 parallel drains, resends | 3 files, +596/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
+| 12 | `fix/feed-single-drain` | `8699c7b` | O-20, O-21 parallel drains, resends | 3 files, +605/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
@@ -74,4 +74,4 @@ and resolve 14 the same way. After 15, `article.OverviewLine` has no caller outs
 - Remove the `knownIssue(...)` call of the merged finding in the fork's `e2e/` tests, so the
   test runs by default.
 - Update ISSUES.md: status **fixed (#PR)**.
-- Rebuild `merge-train` from the rest and rerun the checks above before filing the next PR.
+- Rebuild `merge-train` on the new upstream `main` (`git fetch https://github.com/tgeek77/OpenUsenetServer main && ./merge-train.sh FETCH_HEAD`; merged branches are skipped) and rerun the checks above before filing the next PR. If Jason squashes or rebases a PR, the branches after it may need a rebase; the script stops at the first conflict.
