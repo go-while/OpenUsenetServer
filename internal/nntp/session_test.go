@@ -686,3 +686,35 @@ func TestHdrWithoutCurrentArticle(t *testing.T) {
 		t.Fatalf("HDR Subject of the current article: %q", lines)
 	}
 }
+
+// A current article that expired or was cancelled after GROUP is an invalid current article:
+// HDR and OVER without a range answer 420; with an explicit range the number is just missing
+// (423). Found by ous-sol's review.
+func TestHdrOverExpiredCurrentArticle(t *testing.T) {
+	c, st := startTestServer(t)
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	ctx := context.Background()
+	const msgid = "<hdr-expired@test>"
+	if _, err := st.Post(ctx, "Subject: kept", "body\r\n", msgid, "kept", "a@b", "now", "", "news.test", 30, 1, []string{"local.test"}, false); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	send := func(cmd, want string) {
+		t.Helper()
+		if _, err := c.Write([]byte(cmd + "\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		if got := readLine(t, r); !strings.HasPrefix(got, want) {
+			t.Fatalf("%s: got %q, want %s...", cmd, got, want)
+		}
+	}
+	send("GROUP local.test", "211 1 ")
+	if removed, err := st.CancelMessageID(ctx, msgid); err != nil || !removed {
+		t.Fatalf("cancel the current article: %v, %v", removed, err)
+	}
+	send("HDR Subject", "420 ")
+	send("HDR Subject 1", "423 ")
+	send("OVER", "420 ")
+	send("OVER 1", "423 ")
+}
