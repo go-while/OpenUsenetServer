@@ -304,3 +304,16 @@ func TestRegressionO12PostingAccount(t *testing.T) {
 		t.Fatalf("Injection-Info lines %q, want [%q]", got, want)
 	}
 }
+
+// O-23: HDR without a range is about the current article (RFC 3977 8.5.2). In a group without
+// one, OUS answered "423 no articles in that range"; right is 420, as OVER answers. Fixed by
+// fix/hdr-no-current-article. nntp-testkit's no-current-article check covers it from the next
+// kit release on.
+func TestRegressionO23HdrWithoutCurrentArticle(t *testing.T) {
+	knownIssue(t, "O-23", "HDR without a range and no current article answers 423")
+	e := startEnv(t)
+	e.addGroup("local.empty", "y")
+	c := e.dial()
+	c.ExpectCmd(211, "GROUP local.empty")
+	c.ExpectCmd(420, "HDR Subject")
+}
