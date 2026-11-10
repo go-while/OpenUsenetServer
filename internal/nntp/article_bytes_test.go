@@ -27,9 +27,9 @@ func eightBitBodies() map[string]string {
 	}
 }
 
-// readRawBlock reads a multi-line response and returns the status line and
+// readBytesBlock reads a multi-line response and returns the status line and
 // the payload with dot-stuffing undone, keeping every byte.
-func readRawBlock(t *testing.T, r *bufio.Reader) (string, string) {
+func readBytesBlock(t *testing.T, r *bufio.Reader) (string, string) {
 	t.Helper()
 	first := readLine(t, r)
 	var b strings.Builder
@@ -69,7 +69,7 @@ func TestIHaveStoresEightBitBodyExactly(t *testing.T) {
 				t.Fatalf("ihave %q", l)
 			}
 			_, _ = c.Write([]byte("BODY " + msgid + "\r\n"))
-			first, got := readRawBlock(t, r)
+			first, got := readBytesBlock(t, r)
 			if !strings.HasPrefix(first, "222 ") {
 				t.Fatalf("body %q", first)
 			}
@@ -77,7 +77,7 @@ func TestIHaveStoresEightBitBodyExactly(t *testing.T) {
 				t.Fatalf("body changed:\n got %q\nwant %q", got, body)
 			}
 			_, _ = c.Write([]byte("HEAD " + msgid + "\r\n"))
-			first, head := readRawBlock(t, r)
+			first, head := readBytesBlock(t, r)
 			if !strings.HasPrefix(first, "221 ") {
 				t.Fatalf("head %q", first)
 			}
@@ -109,7 +109,7 @@ func TestPostStoresEightBitBodyExactly(t *testing.T) {
 				t.Fatalf("post %q", l)
 			}
 			_, _ = c.Write([]byte("ARTICLE " + msgid + "\r\n"))
-			first, got := readRawBlock(t, r)
+			first, got := readBytesBlock(t, r)
 			if !strings.HasPrefix(first, "220 ") {
 				t.Fatalf("article %q", first)
 			}
