@@ -166,36 +166,60 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 // are valid UTF-8, so convert_to keeps their bytes. The generated search_tsv
 // column depends on body; it is dropped here and re-created by migrateSearch.
 func (p *Postgres) migrateArticleBytes(ctx context.Context) error {
-	rows, err := p.pool.Query(ctx, `
-		SELECT column_name FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name = 'articles'
-		  AND column_name IN ('headers', 'body') AND data_type <> 'bytea'`)
-	if err != nil {
-		return fmt.Errorf("article bytes migrate: %w", err)
-	}
-	cols, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("article bytes migrate: %w", err)
-	}
-	if len(cols) == 0 {
-		return nil
+	cols, err := articleTextColumns(ctx, p.pool)
+	if err != nil || len(cols) == 0 {
+		return err
 	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	stmts := []string{`ALTER TABLE articles DROP COLUMN IF EXISTS search_tsv`}
-	for _, c := range cols {
-		stmts = append(stmts, fmt.Sprintf(
-			`ALTER TABLE articles ALTER COLUMN %[1]s TYPE bytea USING convert_to(%[1]s, 'UTF8')`, c))
+	// Another server may be running the same upgrade: look again under the
+	// table lock, so only the first one converts.
+	if _, err := tx.Exec(ctx, `LOCK TABLE articles IN ACCESS EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
 	}
-	for _, q := range stmts {
-		if _, err := tx.Exec(ctx, q); err != nil {
-			return fmt.Errorf("article bytes migrate: %w", err)
-		}
+	if cols, err = articleTextColumns(ctx, tx); err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return tx.Commit(ctx)
+	}
+	// search_tsv is generated from headers and body; it is added again by
+	// migrateSearch. Both columns change in one ALTER: one table rewrite.
+	if _, err := tx.Exec(ctx, `ALTER TABLE articles DROP COLUMN IF EXISTS search_tsv`); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
+	}
+	alters := make([]string, len(cols))
+	for i, c := range cols {
+		alters[i] = fmt.Sprintf(`ALTER COLUMN %[1]s TYPE bytea USING convert_to(%[1]s, 'UTF8')`, c)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE articles `+strings.Join(alters, ", ")); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// articleTextColumns returns which of articles.headers and articles.body are
+// not bytea yet. The table is resolved through search_path, as every other
+// query resolves it.
+func articleTextColumns(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT attname::text FROM pg_attribute
+		WHERE attrelid = 'articles'::regclass AND attname IN ('headers', 'body')
+		  AND attnum > 0 AND NOT attisdropped AND atttypid <> 'bytea'::regtype
+		ORDER BY attnum`)
+	if err != nil {
+		return nil, fmt.Errorf("article bytes migrate: %w", err)
+	}
+	cols, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("article bytes migrate: %w", err)
+	}
+	return cols, nil
 }
 
 // byteaString scans a bytea column into a string, byte for byte.
