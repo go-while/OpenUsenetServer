@@ -23,7 +23,7 @@ func TestPostRefusedGetsOneReply(t *testing.T) {
 	if _, err := st.CreateUser(ctx, store.User{Username: "reader", PasswordHash: hash, Role: store.RoleUser}); err != nil {
 		t.Fatal(err)
 	}
-	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = c.SetDeadline(time.Now().Add(30 * time.Second)) // hang guard; bcrypt is slow under -race
 	r := bufio.NewReader(c)
 	readLine(t, r) // greeting
 
