@@ -11,6 +11,7 @@ import (
 
 // postRaw sends POST and the raw article (CRLF lines, dot-stuffed, ending in "\r\n.\r\n")
 // on a logged-in c and returns the final status line, which must carry code want.
+// TODO(nntp-testkit): replace with the kit's POST helper (code + line) once it exists.
 func postRaw(c *client.Conn, want int, raw string) string {
 	c.ExpectCmd(340, "POST")
 	c.MustSend(raw)

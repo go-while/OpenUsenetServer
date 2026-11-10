@@ -39,6 +39,7 @@ func ihaveRaw(c *client.Conn, msgid, art string, want int) string {
 }
 
 // postArticle posts art (exact bytes, CRLF lines) and expects 340, then want.
+// TODO(nntp-testkit): replace with the kit's POST helper (code + line) once it exists.
 func postArticle(c *client.Conn, art string, want int) string {
 	c.ExpectCmd(340, "POST")
 	c.MustSend(dotStuff(art))
