@@ -562,6 +562,10 @@ func cmdHdr(s *Session, args []string) error {
 	if s.group == nil {
 		return s.conn.Reply(FailNoGroup, "no newsgroup selected")
 	}
+	if len(args) == 2 && s.cur == 0 {
+		// No range: HDR is about the current article (RFC 3977 8.5.2), and there is none.
+		return s.conn.Reply(FailArtnumInvalid, "current article number is invalid")
+	}
 	rows, err := s.store.Header(context.Background(), s.group.Name, lo, hi, header)
 	if err != nil {
 		return err

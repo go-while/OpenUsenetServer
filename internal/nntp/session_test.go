@@ -653,3 +653,36 @@ func TestIHaveUnapprovedModeratedStaysStored(t *testing.T) {
 		t.Fatalf("not stored %q", first)
 	}
 }
+
+// HDR without a range is about the current article (RFC 3977 8.5.2): in a group without one
+// it must answer 420, as OVER does, not 423 for an empty range.
+func TestHdrWithoutCurrentArticle(t *testing.T) {
+	c, _ := startTestServer(t)
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	send := func(cmd, want string) string {
+		t.Helper()
+		if _, err := c.Write([]byte(cmd + "\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		got := readLine(t, r)
+		if !strings.HasPrefix(got, want) {
+			t.Fatalf("%s: got %q, want %s...", cmd, got, want)
+		}
+		return got
+	}
+	send("GROUP local.test", "211 0 ")
+	send("HDR Subject", "420 ")
+	send("POST", "340 ")
+	send("From: a@b.c\r\nNewsgroups: local.test\r\nSubject: hdr\r\n\r\nz\r\n.", "240 ")
+	send("GROUP local.test", "211 1 ")
+	send("HDR Subject", "225 ")
+	var lines []string
+	for l := readLine(t, r); l != "."; l = readLine(t, r) {
+		lines = append(lines, l)
+	}
+	if len(lines) != 1 || lines[0] != "1 hdr" {
+		t.Fatalf("HDR Subject of the current article: %q", lines)
+	}
+}
