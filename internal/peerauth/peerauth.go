@@ -1,55 +1,12 @@
 package peerauth
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net"
 	"strings"
 
 	"openusenet/internal/inbound"
 	"openusenet/internal/store"
 )
-
-// PairPassword returns a deterministic shared secret for two pathhosts (mesh/testing).
-func PairPassword(a, b string) string {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if strings.EqualFold(a, b) {
-		return ""
-	}
-	if strings.ToLower(a) > strings.ToLower(b) {
-		a, b = b, a
-	}
-	sum := sha256.Sum256([]byte(a + "\x00" + b + "\x00openusenet-peer"))
-	return hex.EncodeToString(sum[:8])
-}
-
-// FillPasswords sets incoming/outgoing passwords when empty.
-func FillPasswords(localPathhost string, p *store.Peer) {
-	if p == nil {
-		return
-	}
-	remote := strings.TrimSpace(p.PathToken)
-	if remote == "" {
-		remote = strings.TrimSpace(p.IncomingHost)
-	}
-	if remote == "" {
-		remote = strings.TrimSpace(p.Host)
-	}
-	if remote == "" || net.ParseIP(remote) != nil {
-		return
-	}
-	secret := PairPassword(localPathhost, remote)
-	if secret == "" {
-		return
-	}
-	if strings.TrimSpace(p.IncomingPassword) == "" {
-		p.IncomingPassword = secret
-	}
-	if strings.TrimSpace(p.OutgoingPassword) == "" {
-		p.OutgoingPassword = secret
-	}
-}
 
 // MatchPeer finds the enabled peer matching remoteAddr.
 func MatchPeer(peers []store.Peer, remoteAddr string) *store.Peer {

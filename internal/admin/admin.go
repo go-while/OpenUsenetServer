@@ -774,7 +774,12 @@ func (p *Portal) peers(w http.ResponseWriter, r *http.Request, _ store.User) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 				return
 			}
-			writeJSON(w, http.StatusOK, p.peerDetail(*peer))
+			detail, err := p.peerDetail(r.Context(), *peer)
+			if err != nil {
+				writeErr(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, detail)
 			return
 		}
 		ps, err := p.st.ListPeers(r.Context())
@@ -796,7 +801,12 @@ func (p *Portal) peers(w http.ResponseWriter, r *http.Request, _ store.User) {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, p.peerDetail(*created))
+		detail, err := p.peerDetail(r.Context(), *created)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
 	case http.MethodPatch:
 		var in store.Peer
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -809,7 +819,12 @@ func (p *Portal) peers(w http.ResponseWriter, r *http.Request, _ store.User) {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, p.peerDetail(*peer))
+		detail, err := p.peerDetail(r.Context(), *peer)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
 	case http.MethodDelete:
 		id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 		if err := p.st.DeletePeer(r.Context(), id); err != nil {
@@ -830,7 +845,7 @@ func firstExclusion(pathToken string) string {
 	return strings.TrimSpace(pathToken)
 }
 
-func (p *Portal) peerDetail(peer store.Peer) map[string]any {
+func (p *Portal) peerDetail(ctx context.Context, peer store.Peer) (map[string]any, error) {
 	spec := peer.INNSpec()
 	remote := firstExclusion(peer.PathToken)
 	if remote == "" {
@@ -839,15 +854,34 @@ func (p *Portal) peerDetail(peer store.Peer) map[string]any {
 	if remote == "" {
 		remote = peer.Host
 	}
-	opts := inn.ExportOpts{
-		RemotePathhost: remote,
-		Password:       peerauth.PairPassword(p.cfg.Server.Pathhost, remote),
+	pass, err := p.peerSnippetPassword(ctx, peer)
+	if err != nil {
+		return nil, err
 	}
+	opts := inn.ExportOpts{RemotePathhost: remote, Password: pass}
 	return map[string]any{
 		"peer":     peer,
 		"snippets": inn.Snippets(spec),
 		"our_side": p.ourSideSnippets(opts),
+	}, nil
+}
+
+// peerSnippetPassword is the password the incoming.conf snippet asks the remote peer to
+// require from us. It is the peer's outgoing password when one is set (what the feeder sends);
+// otherwise a random secret created once per peer and stored, so the snippet shows the same
+// value on every view and nobody can derive it.
+func (p *Portal) peerSnippetPassword(ctx context.Context, peer store.Peer) (string, error) {
+	if pw := strings.TrimSpace(peer.OutgoingPassword); pw != "" {
+		return pw, nil
 	}
+	secret, err := p.st.GetOrCreateSecret(ctx, fmt.Sprintf("peer-password-%d", peer.ID))
+	if err != nil {
+		return "", err
+	}
+	if len(secret) > 32 {
+		secret = secret[:32] // 16 random bytes in hex are plenty for a feed password
+	}
+	return secret, nil
 }
 
 func (p *Portal) ourSideSnippets(opts inn.ExportOpts) map[string]string {
