@@ -426,13 +426,15 @@ func (s *Session) lookup(args []string) (*store.StoredArticle, bool, error) {
 		}
 		return a, true, nil
 	}
-	if s.group == nil {
-		_ = s.conn.Reply(FailNoGroup, "no newsgroup selected")
-		return nil, false, nil
-	}
+	// RFC 3977 3.2.1: a malformed argument is a syntax error (501) whether or
+	// not a group is selected, so check it before the group (412).
 	n, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil || n < 1 {
 		_ = s.conn.Reply(ErrSyntax, "syntax error")
+		return nil, false, nil
+	}
+	if s.group == nil {
+		_ = s.conn.Reply(FailNoGroup, "no newsgroup selected")
 		return nil, false, nil
 	}
 	a, err := s.store.GetByNumber(ctx, s.group.Name, n)
@@ -484,6 +486,9 @@ func cmdLast(s *Session, _ []string) error {
 }
 
 func cmdOver(s *Session, args []string) error {
+	if len(args) == 2 && !rangeOrMsgID(args[1]) {
+		return s.conn.Reply(ErrSyntax, "syntax error")
+	}
 	if s.group == nil && (len(args) < 2 || !strings.HasPrefix(args[1], "<")) {
 		return s.conn.Reply(FailNoGroup, "no newsgroup selected")
 	}
@@ -536,6 +541,9 @@ func cmdOver(s *Session, args []string) error {
 
 func cmdHdr(s *Session, args []string) error {
 	header := args[1]
+	if len(args) == 3 && !rangeOrMsgID(args[2]) {
+		return s.conn.Reply(ErrSyntax, "syntax error")
+	}
 	if s.group == nil && (len(args) < 3 || !strings.HasPrefix(args[2], "<")) {
 		return s.conn.Reply(FailNoGroup, "no newsgroup selected")
 	}
@@ -1334,6 +1342,17 @@ func isDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// rangeOrMsgID reports whether an OVER or HDR argument is well-formed: a
+// valid message-id or a range. Anything else is a syntax error (501), which
+// RFC 3977 puts before the group (412) and article (423, 430) checks.
+func rangeOrMsgID(arg string) bool {
+	if strings.HasPrefix(arg, "<") {
+		return article.ValidMessageID(arg)
+	}
+	_, _, err := parseRange(arg)
+	return err == nil
 }
 
 func parseRange(spec string) (lo, hi int64, err error) {
