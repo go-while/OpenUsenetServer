@@ -379,10 +379,15 @@ func (s *Session) fetch(args []string, code int, head, body bool) error {
 		return s.conn.ReplyArgs(code, []string{nstr, a.MessageID}, text)
 	}
 	var payload []byte
-	if head && body {
-		payload = []byte(a.Headers + "\r\n\r\n" + a.Body)
-	} else if head {
-		payload = []byte(a.Headers + "\r\n")
+	if head {
+		// Xref is set for this reply only; the stored head and what the
+		// feeder sends from it stay without (RFC 5537 section 3.3).
+		served := article.ServedHead(a.Headers, a.Xref)
+		if body {
+			payload = []byte(served + "\r\n\r\n" + a.Body)
+		} else {
+			payload = []byte(served + "\r\n")
+		}
 	} else {
 		payload = []byte(a.Body)
 	}
