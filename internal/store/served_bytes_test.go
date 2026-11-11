@@ -49,9 +49,16 @@ func servedBytesTestPostgres(t *testing.T) string {
 	return u.String()
 }
 
-// servedSize is the size of the article as ARTICLE serves it.
+// servedSize is the size of the article as ARTICLE serves it, counted apart
+// from article.ServedSize: the dot block goes out with CRLF line ends and a
+// final CRLF (for the test articles here, which have no bare CR).
 func servedSize(head, body, xref string) int {
-	return len(article.ServedHead(head, xref)) + 4 + len(body)
+	wire := article.ServedHead(head, xref) + "\r\n\r\n" + body
+	wire = strings.ReplaceAll(strings.ReplaceAll(wire, "\r\n", "\n"), "\n", "\r\n")
+	if !strings.HasSuffix(wire, "\r\n") {
+		wire += "\r\n"
+	}
+	return len(wire)
 }
 
 // legacyRestart turns the rows into rows stored before the served-size count
@@ -194,6 +201,10 @@ func TestPostgresServedBytesMigration(t *testing.T) {
 			"From: f@x\r\nSubject: folded\r\nMessage-ID: <mig-folded@test>", "b\r\n\r\nc\r\n"},
 		{"<mig-twice@test>", "XREF: one a:1\r\nPath: a!b\r\nFrom: f@x\r\nSubject: twice\r\n" +
 			"Message-ID: <mig-twice@test>\r\nxref: two b:2", ".dot\r\n"},
+		// Older rows with LF-only line ends: ARTICLE sends them as CRLF.
+		{"<mig-lf@test>", "Path: a!b\nFrom: f@x\nSubject: lf\nMessage-ID: <mig-lf@test>", "one\n.two\n\nthree\n"},
+		{"<mig-lf-xref@test>", "Path: a!b\nXref: old a:1\n\tb:2\nFrom: f@x\nSubject: lf xref\nMessage-ID: <mig-lf-xref@test>",
+			"no final line end"},
 	}
 	raw := map[string]int{}
 	xref := map[string]string{}

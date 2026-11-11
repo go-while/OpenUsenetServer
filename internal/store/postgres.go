@@ -680,7 +680,8 @@ func (p *Postgres) Post(ctx context.Context, headers, body, msgid, subject, from
 		nums[u.name] = u.num
 	}
 	xref := xrefHost + " " + strings.Join(xrefParts, " ")
-	bytes += article.ServedXrefDelta(headers, xref)
+	// bytes is the size ARTICLE sends, with our Xref line (the caller counts the article as stored).
+	bytes = article.ServedSize(headers, body, xref)
 
 	var artID int64
 	err = tx.QueryRow(ctx, `

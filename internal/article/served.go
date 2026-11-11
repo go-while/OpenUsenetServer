@@ -58,10 +58,35 @@ func ServedHead(head, xref string) string {
 	return out
 }
 
-// ServedXrefDelta is the size ServedHead adds to head (negative when it
-// replaces a longer Xref field). The stores add it to the stored byte count,
-// so that :bytes in OVER and HDR is the size of the article as ARTICLE serves
-// it (RFC 3977 section 8.5.2).
-func ServedXrefDelta(head, xref string) int {
-	return len(ServedHead(head, xref)) - len(head)
+// ServedSize is the size in octets of the article ARTICLE sends for a stored
+// head and body with Xref value xref: WireLen of ServedHead(head, xref), the
+// empty line and body, as Session.fetch assembles it. The stores keep it as
+// the article's bytes, so that :bytes in OVER and HDR is the size of the
+// article as served (RFC 3977 section 8.5.2).
+func ServedSize(head, body, xref string) int {
+	return WireLen(ServedHead(head, xref) + "\r\n\r\n" + body)
+}
+
+// WireLen is the number of octets nntp.Conn.WriteDot writes for payload,
+// without the dot-stuffing and without the terminating ".\r\n". It treats
+// line ends exactly as the writer does: payload is split at each LF, one CR
+// right before the LF (or at the very end of payload) is dropped, and every
+// line goes out followed by CRLF; nothing follows a final LF. So an LF-only
+// line end counts as CRLF, and a bare CR inside a line counts as one octet.
+func WireLen(payload string) int {
+	n, start := 0, 0
+	for start < len(payload) {
+		end, next := len(payload), len(payload)
+		if i := strings.IndexByte(payload[start:], '\n'); i >= 0 {
+			end = start + i
+			next = end + 1
+		}
+		line := end - start
+		if line > 0 && payload[end-1] == '\r' {
+			line--
+		}
+		n += line + 2
+		start = next
+	}
+	return n
 }

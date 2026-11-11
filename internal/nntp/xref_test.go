@@ -178,18 +178,27 @@ func TestOverBytesCountServedXref(t *testing.T) {
 
 	ihave(t, c, r, "<xref-bytes-1@news.test>", "Path: p!x\r\nFrom: a@b.c\r\nNewsgroups: local.test\r\n"+
 		"Subject: s\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\nMessage-ID: <xref-bytes-1@news.test>\r\n", "b\r\n")
-	head := "Path: p!x\r\nFrom: a@b.c\r\nNewsgroups: local.test\r\nXref: an.old.server.example local.test:12345\r\n" +
-		"\tlocal.other:1\r\nSubject: s\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\nMessage-ID: <xref-bytes-2@news.test>"
-	body := "b\r\n"
-	if _, err := st.Post(context.Background(), head, body, "<xref-bytes-2@news.test>", "s", "a@b.c",
-		"Mon, 01 Jan 2024 00:00:00 +0000", "", "news.test", len(head)+4+len(body), 1,
-		[]string{"local.test"}, false); err != nil {
-		t.Fatal(err)
+	// Stored forms older rows and imports can have: an Xref field kept in
+	// the head, LF-only line ends (served as CRLF), a bare CR in the body.
+	for i, a := range []struct{ head, body string }{
+		{"Path: p!x\r\nFrom: a@b.c\r\nNewsgroups: local.test\r\nXref: an.old.server.example local.test:12345\r\n" +
+			"\tlocal.other:1\r\nSubject: s\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\nMessage-ID: <xref-bytes-2@news.test>", "b\r\n"},
+		{"Path: p!x\nFrom: a@b.c\nNewsgroups: local.test\nSubject: lf\nMessage-ID: <xref-bytes-3@news.test>",
+			"one\n.two\n\nthree\n"},
+		{"Path: p!x\nFrom: a@b.c\nXref: old a:1\n b:2\nNewsgroups: local.test\nSubject: lf\nMessage-ID: <xref-bytes-4@news.test>",
+			"col1\rcol2\r\nlast"},
+	} {
+		id := "<xref-bytes-" + strconv.Itoa(i+2) + "@news.test>"
+		if _, err := st.Post(context.Background(), a.head, a.body, id, "s", "a@b.c",
+			"Mon, 01 Jan 2024 00:00:00 +0000", "", "news.test", len(a.head)+4+len(a.body), 1,
+			[]string{"local.test"}, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	_, _ = c.Write([]byte("GROUP local.test\r\n"))
 	_ = readLine(t, r)
-	for _, n := range []string{"1", "2"} {
+	for _, n := range []string{"1", "2", "3", "4"} {
 		size := strconv.Itoa(len(fetchRaw(t, c, r, "ARTICLE "+n, "220")))
 		f := strings.Split(strings.TrimSuffix(fetchRaw(t, c, r, "OVER "+n, "224"), "\r\n"), "\t")
 		if len(f) != 9 || f[6] != size {

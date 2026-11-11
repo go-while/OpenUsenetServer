@@ -10,18 +10,21 @@ import (
 )
 
 // servedBytesMigration names the one-time recount of articles.bytes in
-// store_migrations.
-const servedBytesMigration = "served-xref-bytes"
+// store_migrations. (An earlier development version used
+// "served-xref-bytes" and did not count LF-only line ends as the writer sends
+// them; the new name makes databases it ran on recount.)
+const servedBytesMigration = "served-wire-bytes"
 
-// servedBytesBatch is how many articles one round of the recount reads.
-const servedBytesBatch = 1000
+// servedBytesBatch is how many articles one round of the recount reads. The
+// rows carry the body, so it is kept small.
+const servedBytesBatch = 200
 
-// migrateServedBytes recounts articles.bytes once as the size ARTICLE serves:
-// the stored article (headers, the empty line, body: octet_length(headers) +
-// 4 + octet_length(body), as Post's callers count it) plus
-// article.ServedXrefDelta for the Xref line ARTICLE adds. Post stores new
-// rows that way; rows stored before kept the size without Xref. Only the
-// bytes column changes, the stored article is not touched.
+// migrateServedBytes recounts articles.bytes once as the size ARTICLE sends,
+// article.ServedSize: the stored head with our Xref line, the empty line and
+// the body, with the line ends nntp.Conn.WriteDot writes (LF-only line ends
+// of older rows go out as CRLF). Post stores new rows that way; rows stored
+// before kept the stored size without Xref. Only the bytes column changes,
+// the stored article is not touched.
 //
 // It runs once: under an advisory lock, the table and the marker row in
 // store_migrations are created in the same transaction as the updates, so a
@@ -29,8 +32,8 @@ const servedBytesBatch = 1000
 // the lock) does nothing. Upgrade all servers that share a database together:
 // a server still running older code stores new rows without the Xref line. The new
 // value is computed from the row, not added to it, so even a second run would
-// not count anything twice. Reading headers into []byte and the sizes with
-// octet_length works for headers/body as TEXT and as BYTEA.
+// not count anything twice. Reading headers and body into []byte works for
+// them as TEXT and as BYTEA.
 func (p *Postgres) migrateServedBytes(ctx context.Context) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -67,36 +70,34 @@ func (p *Postgres) migrateServedBytes(ctx context.Context) error {
 // recountServedBytes sets articles.bytes to the served size for every row
 // where it differs and returns how many rows it changed.
 func recountServedBytes(ctx context.Context, tx pgx.Tx) (int64, error) {
-	type row struct {
-		id   int64
-		head []byte
-		raw  int64
-		xref string
+	type update struct {
+		id    int64
+		bytes int
 	}
 	var changed int64
 	var last int64
 	for {
 		rows, err := tx.Query(ctx, `
-			SELECT id, headers, octet_length(headers)::bigint + 4 + octet_length(body)::bigint, bytes, xref
+			SELECT id, headers, body, bytes, xref
 			FROM articles WHERE id > $1 ORDER BY id LIMIT $2`, last, servedBytesBatch)
 		if err != nil {
 			return 0, fmt.Errorf("served bytes migrate: %w", err)
 		}
-		var todo []row
+		var todo []update
 		n := 0
 		for rows.Next() {
-			var r row
-			var bytes int64
-			if err := rows.Scan(&r.id, &r.head, &r.raw, &bytes, &r.xref); err != nil {
+			var id int64
+			var head, body []byte
+			var bytes int
+			var xref string
+			if err := rows.Scan(&id, &head, &body, &bytes, &xref); err != nil {
 				rows.Close()
 				return 0, fmt.Errorf("served bytes migrate: %w", err)
 			}
 			n++
-			last = r.id
-			r.raw += int64(article.ServedXrefDelta(string(r.head), r.xref))
-			if r.raw != bytes {
-				r.head = nil
-				todo = append(todo, r)
+			last = id
+			if served := article.ServedSize(string(head), string(body), xref); served != bytes {
+				todo = append(todo, update{id, served})
 			}
 		}
 		rows.Close()
@@ -105,8 +106,8 @@ func recountServedBytes(ctx context.Context, tx pgx.Tx) (int64, error) {
 		}
 		if len(todo) > 0 {
 			b := &pgx.Batch{}
-			for _, r := range todo {
-				b.Queue(`UPDATE articles SET bytes = $1 WHERE id = $2`, r.raw, r.id)
+			for _, u := range todo {
+				b.Queue(`UPDATE articles SET bytes = $1 WHERE id = $2`, u.bytes, u.id)
 			}
 			if err := tx.SendBatch(ctx, b).Close(); err != nil {
 				return 0, fmt.Errorf("served bytes migrate: %w", err)
