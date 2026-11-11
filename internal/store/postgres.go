@@ -153,6 +153,10 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := p.migrateServedBytes(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -676,6 +680,8 @@ func (p *Postgres) Post(ctx context.Context, headers, body, msgid, subject, from
 		nums[u.name] = u.num
 	}
 	xref := xrefHost + " " + strings.Join(xrefParts, " ")
+	// bytes is the size ARTICLE sends, with our Xref line (the caller counts the article as stored).
+	bytes = article.ServedSize(headers, body, xref)
 
 	var artID int64
 	err = tx.QueryRow(ctx, `

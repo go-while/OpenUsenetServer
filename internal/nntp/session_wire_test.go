@@ -58,7 +58,9 @@ func TestIHaveKeepsArticleBytes(t *testing.T) {
 		t.Fatalf("ihave %q", l)
 	}
 
-	wantHead := strings.Replace(head, "Path: other!", "Path: news.test!other!", 1)
+	// Served heads also carry our Xref (O-10, xref_test.go).
+	wantHead := strings.Replace(head, "Path: other!", "Path: news.test!other!", 1) +
+		"Xref: news.test local.test:1\r\n"
 	_, _ = c.Write([]byte("ARTICLE " + msgid + "\r\n"))
 	first, got := readRawBlock(t, r)
 	if !strings.HasPrefix(first, "220 ") {
