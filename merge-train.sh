@@ -10,14 +10,15 @@
 #   sh ../OpenUsenetServer/merge-train.sh FETCH_HEAD # after an upstream merge
 #
 # It resets merge-train to the base, so it refuses to run with uncommitted or untracked files or on any
-# other branch. Branches the base already contains (merged upstream) are skipped. Stops at the
-# first conflict.
+# other branch. Branches the base already contains (merged upstream) are skipped. Conflicts git
+# rerere has a recorded resolution for (rr-cache of this clone) are replayed; any other conflict
+# stops it.
 set -e
 BASE=${1:-abe8543}
 ORDER="fix/authinfo-codes fix/go-vet-self-assign fix/server-test-watchdog fix/post-auth-reply
 fix/takethis-reply-text fix/hdr-no-current-article fix/posting-account fix/listener-race
-fix/import-job-race fix/inbound-peer-by-hostname fix/mode-stream-fallback fix/feed-single-drain
-fix/peer-password-random fix/keep-article-bytes fix/over-msgid-bytes-on-kab fix/store-articles-bytea"
+fix/import-job-race fix/inbound-peer-by-hostname fix/example-pathhost fix/mode-stream-fallback
+fix/feed-single-drain fix/feed-persistent-conn fix/peer-password-random fix/keep-article-bytes fix/over-msgid-bytes-on-kab fix/store-articles-bytea"
 
 if [ "$(git branch --show-current)" != merge-train ]; then
 	echo "check out branch merge-train in this worktree first" >&2
@@ -35,8 +36,12 @@ for b in $ORDER; do
 		echo "merged   $b (in the base)"
 		continue
 	fi
-	if git merge -q --no-ff --no-edit "$b" >/dev/null 2>&1; then
+	if git -c rerere.enabled=true merge -q --no-ff --no-edit --rerere-autoupdate "$b" >/dev/null 2>&1; then
 		echo "ok       $b $(git rev-parse --short "$b")"
+	elif [ -z "$(git diff --name-only --diff-filter=U)" ]; then
+		# git rerere replayed a recorded resolution (see MERGE-PLAN.md) for every file
+		git commit -q --no-edit
+		echo "resolved $b $(git rev-parse --short "$b") (recorded resolution)"
 	else
 		echo "CONFLICT $b: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
 		git merge --abort

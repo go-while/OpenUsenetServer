@@ -69,7 +69,7 @@ answers reader commands with 480).
 | [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open (fix: fork branch `fix/go-vet-self-assign`) |
 | [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open (fix: fork branch `fix/keep-article-bytes`) |
-| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open (fix in progress: fork branch `fix/feed-persistent-conn`) |
+| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open (fix: fork branch `fix/feed-persistent-conn`, in review) |
 | [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open (fix: fork branch `fix/mode-stream-fallback`) |
 | [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
 | [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open (fix: fork branch `fix/feed-single-drain`) |
