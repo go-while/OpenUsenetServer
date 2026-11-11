@@ -665,14 +665,14 @@ func (s *Session) requirePostAuth() error {
 		return nil // open posting until first user is created
 	}
 	if !s.authOK {
-		return s.conn.Reply(FailAuthNeeded, "Authentication required for POST")
+		return replied(s.conn.Reply(FailAuthNeeded, "Authentication required for POST"))
 	}
 	u, err := s.store.GetUser(context.Background(), s.authUser)
 	if err != nil {
 		return err
 	}
 	if u == nil || !u.MayPost() {
-		return s.conn.Reply(FailPostAuth, "posting not permitted")
+		return replied(s.conn.Reply(FailPostAuth, "posting not permitted"))
 	}
 	return nil
 }
