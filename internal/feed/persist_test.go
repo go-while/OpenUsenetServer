@@ -620,15 +620,18 @@ func TestStreamingReplyRequiresID(t *testing.T) {
 			}
 		})
 	}
-	t.Run("CHECK500", func(t *testing.T) {
-		// 500/501 to CHECK carries no id and still means IHAVE.
-		s := scriptSession(newScriptConn("500 what?\r\n335 send it\r\n235 thanks\r\n"))
-		var accepted bool
-		j := &job{msgid: id, wire: testWire(id), done: func(a bool, _ error) { accepted = a }}
-		if left, _, err := s.stream(1, once(j)); err != nil || len(left) != 0 || !accepted || s.streaming {
-			t.Fatalf("err %v, left %d, accepted %v, streaming %v; want the IHAVE fallback", err, len(left), accepted, s.streaming)
-		}
-	})
+	// 500/501 to CHECK carries no id and still means IHAVE, whatever its text says, even
+	// text that starts with "<" (ous-sol's review).
+	for _, reply := range []string{"500 what?", "500 <CHECK> unsupported command", "501 <argument> not understood"} {
+		t.Run(reply, func(t *testing.T) {
+			s := scriptSession(newScriptConn(reply + "\r\n335 send it\r\n235 thanks\r\n"))
+			var accepted bool
+			j := &job{msgid: id, wire: testWire(id), done: func(a bool, _ error) { accepted = a }}
+			if left, _, err := s.stream(1, once(j)); err != nil || len(left) != 0 || !accepted || s.streaming {
+				t.Fatalf("err %v, left %d, accepted %v, streaming %v; want the IHAVE fallback", err, len(left), accepted, s.streaming)
+			}
+		})
+	}
 }
 
 // A CHECK the peer does not know (500) moves the connection to IHAVE for good: the next

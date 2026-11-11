@@ -207,7 +207,9 @@ func (s *session) stream(window int, next func() *job) ([]*job, int, error) {
 		}
 		replies++
 		o := out[0]
-		if id := replyID(line); (id != "" || carriesID(code)) && id != o.j.msgid {
+		// Only the RFC 4644 reply codes carry the id; the text of a 500/501 is free form
+		// (it may even start with "<"), so it is not checked.
+		if carriesID(code) && replyID(line) != o.j.msgid {
 			return left(), replies, fmt.Errorf("reply %q to %s: out of step", line, o.command())
 		}
 		out = out[1:]
