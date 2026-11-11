@@ -10,13 +10,12 @@ earlier ones land.
 
 ## How it was checked
 
-- **Pairwise:** all 120 pairs of the 16 branches were merged test-wise (`git merge-tree`).
+- **Pairwise:** all pairs of the branches were merged test-wise (`git merge-tree`).
   Conflicts that were only tests appended to the same file were removed by moving each
-  branch's tests into its own file. One conflict is left: O-11 with keep-article-bytes (see the
-  order). Clashes git cannot see (two test helpers with one name; a changed function signature
+  branch's tests into its own file. Two conflicts are left, both with keep-article-bytes and each a few lines (see below). Clashes git cannot see (two test helpers with one name; a changed function signature
   that another branch's test calls) showed up when building the integration and were fixed on
   the branches.
-- **Integration:** branch `merge-train` is `main` plus all 16 branches merged in the order below,
+- **Integration:** branch `merge-train` is `main` plus all 18 branches merged in the order below,
   without a conflict. On it: `go build`, `go vet ./...` (clean, O-14 included), `go test ./...`
   and `go test -race ./...` pass.
 - **e2e:** `merge-train` plus the fork's `e2e/` suite (nntp-testkit, 36 tests), with
@@ -43,8 +42,10 @@ earlier ones land.
 | 8 | `fix/listener-race` | `d95499d` | O-22 listener data race | +8/-4 | small |
 | 9 | `fix/import-job-race` | `6e79e9d` | O-26 archive job data race | 2 files, +61/-2 | small |
 | 10 | `fix/inbound-peer-by-hostname` | `0956037` | O-24 hostname peers bypass patterns | +67/-7 | small, Medium |
+| 10a | `fix/example-pathhost` | `0ab01b1` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 10 files, +393/-8 | small; refuses to start with peers while the name is a placeholder |
 | 11 | `fix/mode-stream-fallback` | `0527278` | O-18 MODE STREAM fallback | +206/-2 | feeder, independent of 12 |
 | 12 | `fix/feed-single-drain` | `8699c7b` | O-20, O-21 parallel drains, resends | 3 files, +605/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
+| 12a | `fix/feed-persistent-conn` | `e9c3ce1` | O-17 one persistent, pipelined connection per peer | 5 files, +1606/-160 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
@@ -53,6 +54,14 @@ earlier ones land.
 Steps 2 to 13 are independent of each other: they merge onto `main` and onto each other in
 any order without a conflict (checked pairwise), and all of them together build and pass. The order above is only small and safe
 first. 14 to 16 are the large changes; 15 depends on 14.
+
+### O-17 and keep-article-bytes
+
+keep-article-bytes changes one line in the feeder: stored articles are parsed with
+`article.ParseLenient` (heads stored by older versions may not pass the strict `Parse`). The
+O-17 branch moved that code from `deliver` into the new `prepare`. Whichever lands second takes
+over the line: `parsed, _ := article.ParseLenient(wire)` in `prepare`. `merge-train.sh` replays
+this resolution with git rerere.
 
 ### O-11 and keep-article-bytes
 
@@ -64,9 +73,8 @@ and resolve 14 the same way. After 15, `article.OverviewLine` has no caller outs
 
 ## Not in this plan
 
-- **O-17** (a persistent, pipelined connection per peer): design question for the maintainer;
-  12 bounds the damage (one drain, no resends).
-- **O-07, O-08, O-10**: reported or decisions, see ISSUES.md.
+- **O-07**: not a bug (Debian presets `GOTOOLCHAIN=local`), see ISSUES.md.
+- **O-10**: Xref in served articles, not written yet.
 - Admin portal hardening that was discussed but not decided: a one-time token or loopback-only
   first-admin setup, and a rate limit on `/api/login`.
 

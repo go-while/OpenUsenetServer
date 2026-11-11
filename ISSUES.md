@@ -59,8 +59,8 @@ answers reader commands with 480).
 | [O-04](#o-04-capabilities-still-lists-authinfo-after-a-login) | Low | CAPABILITIES still lists `AUTHINFO USER` after a login | PR (#4) |
 | [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | open (fix: fork branch `fix/takethis-reply-text`) |
-| [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Medium | Build fails on Debian, Docker and Podman builds fail on package conflicts | open (reported) |
-| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | decision |
+| [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Low | Build fails on Debian, Docker and Podman builds fail on package conflicts | not a bug (Debian's Go defaults to `GOTOOLCHAIN=local`; see details) |
+| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | open (fix: fork branch `fix/example-pathhost`: placeholder in the examples, refuses to peer with a placeholder name) |
 | [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed on the fork (`e2e/` is its own module) |
 | [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open |
 | [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open (fix: fork branch `fix/over-msgid-bytes`) |
@@ -69,7 +69,7 @@ answers reader commands with 480).
 | [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open (fix: fork branch `fix/go-vet-self-assign`) |
 | [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open (fix: fork branch `fix/keep-article-bytes`) |
-| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open |
+| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open (fix: fork branch `fix/feed-persistent-conn`) |
 | [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open (fix: fork branch `fix/mode-stream-fallback`) |
 | [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
 | [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open (fix: fork branch `fix/feed-single-drain`) |
@@ -142,14 +142,17 @@ transferred <id>`) the id in the text is fine. Verified. Found by the Diablo fee
 
 ### O-07 Build fails on Debian and with Docker or Podman
 Reported in `news.software.nntp` (article 815, 2026-10-06): "it does not want to compile on
-Debian (package conflicts). Also trying docker and podman exposes package conflicts." Not
-reproduced yet. Likely parts, checked on a Debian 13 VM:
-- `go.mod` needs Go 1.25 (`main`); Debian 13 ships `golang-go` 1.24, which refuses the
-  module unless it may download a newer toolchain;
-- the runtime image is Ubuntu 24.04 because cleanfeed-ng needs Perl 5.38 or later
-  (`Dockerfile`); Debian 13 has Perl 5.40, Debian 12 only 5.36.
-Next step: build `main` with the distribution's Go on the test VMs (Debian, Ubuntu, Fedora,
-Alpine, ...) and run `docker build` and `podman build`, and record what fails.
+Debian (package conflicts). Also trying docker and podman exposes package conflicts." Checked,
+not a bug in OpenUsenetServer:
+- `go.mod` asks for Go 1.25. Since Go 1.21 the `go` command fetches the toolchain a module
+  needs by itself (`GOTOOLCHAIN=auto`), but Debian's `golang-go` package (1.24 in Debian 13)
+  presets `GOTOOLCHAIN=local`, so it stops with "go.mod requires go >= 1.25 (running go 1.24;
+  GOTOOLCHAIN=local)". Building with `GOTOOLCHAIN=auto go build ./cmd/openusenet`, or with a Go
+  from go.dev, works.
+- The Docker image builds with `golang:1.25-bookworm` and runs on `ubuntu:24.04` (cleanfeed-ng
+  needs Perl 5.38 or later), so it does not depend on the host's packages; the reported
+  Docker/Podman conflicts were not reproduced and came without an error message.
+A line about `GOTOOLCHAIN=auto` in the README's build section would help Debian users.
 
 ### O-08 The example path host reaches peers
 With `config.example.yml`, `server.pathhost` is `news.localhost`, and every article the
@@ -371,3 +374,5 @@ From the pynntp and conformance runs; recorded so they are not reported again.
   design.
 - Replies to commands by message-id carry article number 0 (`223 0 <id>`): correct per
   RFC 3977 section 6.2.
+- O-07: building on Debian needs `GOTOOLCHAIN=auto` (Debian presets `local`) or a Go from
+  go.dev; not a code problem.
