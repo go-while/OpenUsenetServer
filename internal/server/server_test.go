@@ -14,6 +14,10 @@ import (
 	"openusenet/internal/store"
 )
 
+// watchdogOff keeps the load watchdog out of these tests: on a busy machine it pauses
+// intake (441 load average elevated) and the test fails for reasons unrelated to the code.
+var watchdogOff = false
+
 func waitAddr(t *testing.T, srv *server.Server) net.Addr {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -45,6 +49,7 @@ func TestPOSTFeedsIHAVE(t *testing.T) {
 	cfgB.Server.Pathhost = "news-b"
 	cfgB.Listen.NNTP = "127.0.0.1:0"
 	cfgB.Listen.HTTP = "-"
+	cfgB.Watchdog.Enabled = &watchdogOff
 	srvB := server.New(cfgB, stB, nil, nil)
 	go func() { _ = srvB.ListenAndServe(ctx) }()
 	addrB := waitAddr(t, srvB)
@@ -62,6 +67,7 @@ func TestPOSTFeedsIHAVE(t *testing.T) {
 	cfgA.Server.Pathhost = "news-a"
 	cfgA.Listen.NNTP = "127.0.0.1:0"
 	cfgA.Listen.HTTP = "-"
+	cfgA.Watchdog.Enabled = &watchdogOff
 	cfgA.Peers = []config.Peer{{Host: "127.0.0.1", Port: port}}
 	srvA := server.New(cfgA, stA, nil, nil)
 	go func() { _ = srvA.ListenAndServe(ctx) }()
