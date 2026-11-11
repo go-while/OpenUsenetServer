@@ -247,6 +247,9 @@ func splitCRLF(b []byte) [][]byte {
 	return lines
 }
 
+// Buffered returns the number of bytes read from the connection but not consumed yet.
+func (c *Conn) Buffered() int { return c.r.Buffered() }
+
 func (c *Conn) Close() error {
 	_ = c.w.Flush()
 	return c.c.Close()
