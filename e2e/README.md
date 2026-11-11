@@ -22,7 +22,7 @@ cd e2e && go test -tags e2e -count=1 -run TestFeed -v .
 | Variable | Effect |
 |---|---|
 | `OUS_E2E_KNOWN_ISSUES=1` | also run the tests that pin findings still open on `main` (ISSUES.md); they fail until the fix is merged |
-| `OUS_E2E_SLOW=1` | also run tests that need minutes (the feed claim-lease test, about 155 s; use `-timeout 15m`) |
+| `OUS_E2E_SLOW=1` | also run tests that need minutes (the feed claim-lease test, about 155 s on `main`, about 4 min with the feed fixes merged; use `-timeout 15m`) |
 | `OPENUSENET_TEST_POSTGRES=postgres://...` | run the Postgres test (O-13) in a fresh schema, dropped afterwards |
 | `NNTP_TEST_DEADLINE` | nntp-testkit's hang guard per blocking step (default 60 s); CI elsewhere uses 30s |
 
