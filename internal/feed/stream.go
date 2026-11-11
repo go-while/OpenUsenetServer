@@ -113,8 +113,9 @@ func peerSupportsStreaming(nc *nntp.Conn) (bool, error) {
 		return false, err
 	}
 	if code != nntp.InfoCapabilities {
-		// Old peer: assume IHAVE only.
-		return false, nil
+		// Peer without CAPABILITIES (e.g. Diablo answers 500): fall back
+		// to the legacy MODE STREAM probe (RFC 4644 section 2.3).
+		return peerAcceptsModeStream(nc)
 	}
 	streaming := false
 	for {
@@ -132,6 +133,20 @@ func peerSupportsStreaming(nc *nntp.Conn) (bool, error) {
 		}
 	}
 	return streaming, nil
+}
+
+// peerAcceptsModeStream sends MODE STREAM and reports whether the peer
+// answered 203. Any other reply (500/501/...) means IHAVE only; exactly one
+// reply line is read so the connection stays usable for IHAVE.
+func peerAcceptsModeStream(nc *nntp.Conn) (bool, error) {
+	if err := nc.ReplyRaw("MODE STREAM"); err != nil {
+		return false, err
+	}
+	code, _, err := nc.ReadReply()
+	if err != nil {
+		return false, err
+	}
+	return code == nntp.OKStreamMode, nil
 }
 
 func streamingTransfer(nc *nntp.Conn, msgid string, wire []byte) (bool, error) {
