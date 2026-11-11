@@ -45,7 +45,7 @@ earlier ones land.
 | 10a | `fix/example-pathhost` | `0ab01b1` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 10 files, +393/-8 | small; refuses to start with peers while the name is a placeholder |
 | 11 | `fix/mode-stream-fallback` | `0527278` | O-18 MODE STREAM fallback | +206/-2 | feeder, independent of 12 |
 | 12 | `fix/feed-single-drain` | `8699c7b` | O-20, O-21 parallel drains, resends | 3 files, +605/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
-| 12a | `fix/feed-persistent-conn` | `53726c3` | O-17 one persistent, pipelined connection per peer | 5 files, +1601/-160 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
+| 12a | `fix/feed-persistent-conn` | `e9c3ce1` | O-17 one persistent, pipelined connection per peer | 5 files, +1606/-160 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
