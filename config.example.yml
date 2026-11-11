@@ -2,10 +2,17 @@
 # values via environment variables — you do not need inn.conf.
 
 server:
-  hostname: news.localhost
+  # CHANGE THIS: placeholder. Use this server's own fully qualified domain name.
+  # It is the Message-ID domain and, unless pathhost is set, this site's Path
+  # identity, which peers use for loop detection (RFC 5537 3.1.3), so it must be
+  # unique to this server. With localhost, *.local, *.invalid, example names or an
+  # IP address, serve refuses to start while peers are configured (reader-only
+  # use works, with a warning). Env: OPENUSENET_HOSTNAME.
+  hostname: news.example.org
   organization: OpenUsenetServer
-  # Path header token. Defaults to hostname if omitted.
-  pathhost: news.localhost
+  # Path identity, if it differs from hostname. Defaults to hostname if omitted.
+  # Env: OPENUSENET_PATHHOST.
+  # pathhost: news.example.org
 
 listen:
   nntp: ":1119" # use :119 in Docker; 1119 avoids root on a laptop

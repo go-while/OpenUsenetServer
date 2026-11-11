@@ -110,10 +110,7 @@ func cmdServe(args []string) error {
 		cfg.Listen.HTTP = *httpAddr
 	}
 	if *hostname != "" {
-		cfg.Server.Hostname = *hostname
-		if cfg.Server.Pathhost == cfg.Server.Hostname || cfg.Server.Pathhost == "" {
-			cfg.Server.Pathhost = *hostname
-		}
+		applyHostnameFlag(&cfg, *hostname)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -654,4 +651,15 @@ func splitEq(s string) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+// applyHostnameFlag sets the hostname from --hostname. A pathhost that only followed the old
+// hostname (config.Load fills an omitted pathhost with it) follows the new one; a pathhost set
+// to something else on purpose stays.
+func applyHostnameFlag(cfg *config.Config, hostname string) {
+	old := cfg.Server.Hostname
+	cfg.Server.Hostname = hostname
+	if cfg.Server.Pathhost == "" || cfg.Server.Pathhost == old {
+		cfg.Server.Pathhost = hostname
+	}
 }
