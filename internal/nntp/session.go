@@ -1129,6 +1129,15 @@ func (s *Session) replyTransfer(code int, msgid, text string, withMsgID bool) er
 	return s.conn.Reply(code, text)
 }
 
+// transferredText is the success text for an accepted transfer. TAKETHIS
+// already puts the message-id first (RFC 4644), so it is not repeated there.
+func transferredText(what, msgid string, withMsgID bool) string {
+	if withMsgID {
+		return what + " transferred"
+	}
+	return what + " transferred " + msgid
+}
+
 func (s *Session) acceptPeerArticle(ctx context.Context, msgid string, raw []byte, rejectCode, deferCode, okCode int, withMsgID bool) error {
 	art, err := article.Parse(raw)
 	if err != nil {
@@ -1184,7 +1193,7 @@ func (s *Session) acceptPeerArticle(ctx context.Context, msgid string, raw []byt
 			s.log.Printf("peer transfer cancel %s: %v", msgid, err)
 			return s.replyTransfer(deferCode, msgid, "try again later", withMsgID)
 		}
-		return s.replyTransfer(okCode, msgid, "cancel transferred "+msgid, withMsgID)
+		return s.replyTransfer(okCode, msgid, transferredText("cancel", msgid, withMsgID), withMsgID)
 	} else if err != nil {
 		s.log.Printf("peer transfer control %s: %v", msgid, err)
 		return s.replyTransfer(rejectCode, msgid, err.Error(), withMsgID)
@@ -1209,7 +1218,7 @@ func (s *Session) acceptPeerArticle(ctx context.Context, msgid string, raw []byt
 	if _, err := s.store.NoteAccept(ctx, art.Newsgroups(), isBin, retention.FloodFromConfig(s.cfg)); err != nil && s.log != nil {
 		s.log.Printf("retention note: %v", err)
 	}
-	if err := s.replyTransfer(okCode, msgid, "article transferred "+msgid, withMsgID); err != nil {
+	if err := s.replyTransfer(okCode, msgid, transferredText("article", msgid, withMsgID), withMsgID); err != nil {
 		return err
 	}
 	s.offer(art, wire)

@@ -274,7 +274,7 @@ func TestIHaveAcceptAndDuplicate(t *testing.T) {
 		"body\r\n" +
 		".\r\n"
 	_, _ = c.Write([]byte(art))
-	if l := readLine(t, r); !strings.HasPrefix(l, "235 ") {
+	if l := readLine(t, r); l != "235 article transferred "+msgid {
 		t.Fatalf("ihave ok %q", l)
 	}
 	_, _ = c.Write([]byte("ARTICLE " + msgid + "\r\n"))
@@ -342,13 +342,29 @@ func TestCheckAndTakeThis(t *testing.T) {
 		"body\r\n" +
 		".\r\n"
 	_, _ = c.Write([]byte("TAKETHIS " + msgid + "\r\n" + art))
-	if l := readLine(t, r); !strings.HasPrefix(l, "239 ") {
+	if l := readLine(t, r); l != "239 "+msgid+" article transferred" {
 		t.Fatalf("takethis ok %q", l)
 	}
 
 	_, _ = c.Write([]byte("CHECK " + msgid + "\r\n"))
 	if l := readLine(t, r); !strings.HasPrefix(l, "438 ") {
 		t.Fatalf("check refuse %q", l)
+	}
+
+	cancelID := "<stream-cancel-1@news.test>"
+	cancel := "Path: other!not-for-mail\r\n" +
+		"From: a@b.c\r\n" +
+		"Newsgroups: local.test\r\n" +
+		"Subject: cmsg cancel " + msgid + "\r\n" +
+		"Control: cancel " + msgid + "\r\n" +
+		"Date: Mon, 01 Jan 2024 00:00:00 +0000\r\n" +
+		"Message-ID: " + cancelID + "\r\n" +
+		"\r\n" +
+		"cancel\r\n" +
+		".\r\n"
+	_, _ = c.Write([]byte("TAKETHIS " + cancelID + "\r\n" + cancel))
+	if l := readLine(t, r); l != "239 "+cancelID+" cancel transferred" {
+		t.Fatalf("takethis cancel %q", l)
 	}
 }
 
