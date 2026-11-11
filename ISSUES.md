@@ -62,7 +62,7 @@ answers reader commands with 480).
 | [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Low | Build fails on Debian, Docker and Podman builds fail on package conflicts | not a bug (Debian's Go defaults to `GOTOOLCHAIN=local`; see details) |
 | [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | open (fix: fork branch `fix/example-pathhost`: placeholder in the examples, refuses to peer with a placeholder name) |
 | [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed on the fork (`e2e/` is its own module) |
-| [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open |
+| [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open (fix: fork branch `fix/xref-served`, on keep-article-bytes: Xref set when ARTICLE/HEAD serve, stored articles and the feed unchanged) |
 | [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open (fix: fork branch `fix/over-msgid-bytes`) |
 | [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | open (fix: fork branch `fix/posting-account`) |
 | [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | open (fix: fork branch `fix/store-articles-bytea`; verified on PostgreSQL 16 incl. migration of a live test DB) |
@@ -180,6 +180,15 @@ after `Post` the new Xref is set on the article only for the mbox copy
 `Xref: news.localhost local.test:1` from the stored `xref` column. Effect seen with
 NewsCache: it rebuilds its overview from the article once it caches it, so through the cache
 the field goes empty. Verified. Found by the NewsCache interop run.
+
+Fix (fork branch `fix/xref-served`): ARTICLE and HEAD set `Xref:` from the stored xref value
+when they serve the article (replacing any Xref line in the stored head, which archive imports
+can carry); the stored article and the feed stay as they are. OVER and HDR `:bytes` count the
+served size: new articles store it, and a one-time PostgreSQL migration (under an advisory lock,
+with a marker in a new `store_migrations` table) recounts only the `bytes` column of older rows.
+Upgrade all servers that share one database together: a server still running older code stores
+new rows without the Xref line in the count.
+
 
 ### O-11 OVER by message-id reports the wrong bytes
 `OVER <message-id>` builds a stand-in `Article` with only Subject, From, Date, Message-ID and

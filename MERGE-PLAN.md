@@ -15,7 +15,7 @@ earlier ones land.
   branch's tests into its own file. Two conflicts are left, both with keep-article-bytes and each a few lines (see below). Clashes git cannot see (two test helpers with one name; a changed function signature
   that another branch's test calls) showed up when building the integration and were fixed on
   the branches.
-- **Integration:** branch `merge-train` is `main` plus all 18 branches merged in the order below,
+- **Integration:** branch `merge-train` is `main` plus all 19 branches merged in the order below,
   without a conflict. On it: `go build`, `go vet ./...` (clean, O-14 included), `go test ./...`
   and `go test -race ./...` pass.
 - **e2e:** `merge-train` plus the fork's `e2e/` suite (nntp-testkit, 36 tests), with
@@ -49,6 +49,7 @@ earlier ones land.
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
+| 15a | `fix/xref-served` | `877662d` | O-10 Xref in served articles; byte counts include it | 10 files, +907/-5 on top of 14 | **after 14**; independent of 15 and 16 (merge-tree clean); one-time PG migration of the bytes column, upgrade all servers on one database together |
 | 16 | `fix/store-articles-bytea` | `f42e4fe` | O-13 8-bit articles in PostgreSQL | 9 files, +490/-17 | large, schema migration; last |
 
 Steps 2 to 13 are independent of each other: they merge onto `main` and onto each other in
@@ -74,7 +75,6 @@ and resolve 14 the same way. After 15, `article.OverviewLine` has no caller outs
 ## Not in this plan
 
 - **O-07**: not a bug (Debian presets `GOTOOLCHAIN=local`), see ISSUES.md.
-- **O-10**: Xref in served articles, not written yet.
 - Admin portal hardening that was discussed but not decided: a one-time token or loopback-only
   first-admin setup, and a rate limit on `/api/login`.
 
