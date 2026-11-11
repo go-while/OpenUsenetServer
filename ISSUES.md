@@ -60,7 +60,7 @@ answers reader commands with 480).
 | [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | open (fix: fork branch `fix/keep-article-bytes`) |
 | [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | open (fix: fork branch `fix/takethis-reply-text`) |
 | [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Low | Build fails on Debian, Docker and Podman builds fail on package conflicts | not a bug (Debian's Go defaults to `GOTOOLCHAIN=local`; see details) |
-| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | decision |
+| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | open (fix: fork branch `fix/example-pathhost`: placeholder in the examples, refuses to peer with a placeholder name) |
 | [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed on the fork (`e2e/` is its own module) |
 | [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open |
 | [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open (fix: fork branch `fix/over-msgid-bytes`) |
