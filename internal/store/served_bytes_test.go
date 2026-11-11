@@ -253,3 +253,53 @@ func TestPostgresServedBytesMigration(t *testing.T) {
 		t.Fatalf("recount on served sizes: %d rows changed, %v", n, err)
 	}
 }
+
+// Several servers starting at once on a database without store_migrations: the table
+// creation must be serialised too, not only the marker (it raced and failed with
+// SQLSTATE 23505 on pg_type). Adapted from ous-sol's review fixture.
+func TestPostgresServedBytesConcurrentFirstMigration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	p, err := OpenPostgres(ctx, servedBytesTestPostgres(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	var schema string
+	if err := p.pool.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(schema, "ous_test_xref_") {
+		t.Fatalf("not a scratch schema: %q", schema)
+	}
+	if _, err := p.pool.Exec(ctx, "DROP TABLE "+pgx.Identifier{schema, "store_migrations"}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	n := min(8, int(p.pool.Config().MaxConns))
+	if n < 2 {
+		t.Skip("pool too small for concurrent migrations")
+	}
+	// Warm the pool so opening connections does not serialise the starters.
+	var release []func()
+	for range n {
+		c, err := p.pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		release = append(release, c.Release)
+	}
+	for _, f := range release {
+		f()
+	}
+	start := make(chan struct{})
+	results := make(chan error, n)
+	for range n {
+		go func() { <-start; results <- p.migrateServedBytes(ctx) }()
+	}
+	close(start)
+	for range n {
+		if err := <-results; err != nil {
+			t.Errorf("concurrent first migration: %v", err)
+		}
+	}
+}

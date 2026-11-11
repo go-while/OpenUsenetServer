@@ -23,24 +23,33 @@ const servedBytesBatch = 1000
 // rows that way; rows stored before kept the size without Xref. Only the
 // bytes column changes, the stored article is not touched.
 //
-// It runs once: the marker row in store_migrations is inserted in the same
-// transaction as the updates, so a second start (or a second server starting
-// at the same time, which waits on the marker row) does nothing. The new
+// It runs once: under an advisory lock, the table and the marker row in
+// store_migrations are created in the same transaction as the updates, so a
+// second start (or a second server starting at the same time, which waits on
+// the lock) does nothing. Upgrade all servers that share a database together:
+// a server still running older code stores new rows without the Xref line. The new
 // value is computed from the row, not added to it, so even a second run would
 // not count anything twice. Reading headers into []byte and the sizes with
 // octet_length works for headers/body as TEXT and as BYTEA.
 func (p *Postgres) migrateServedBytes(ctx context.Context) error {
-	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS store_migrations (
-		name TEXT PRIMARY KEY,
-		done_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`); err != nil {
-		return fmt.Errorf("served bytes migrate: %w", err)
-	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("served bytes migrate: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Servers starting at the same time on a fresh database would race in
+	// CREATE TABLE IF NOT EXISTS (duplicate pg_type, SQLSTATE 23505): take a
+	// transaction-scoped advisory lock first, so table creation, marker and
+	// recount run one server at a time.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('openusenet:store_migrations'))`); err != nil {
+		return fmt.Errorf("served bytes migrate: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS store_migrations (
+		name TEXT PRIMARY KEY,
+		done_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		return fmt.Errorf("served bytes migrate: %w", err)
+	}
 	tag, err := tx.Exec(ctx, `INSERT INTO store_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
 		servedBytesMigration)
 	if err != nil {
