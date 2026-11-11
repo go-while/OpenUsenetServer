@@ -102,9 +102,10 @@ func TestRegressionO13EightBitArticlesPostgres(t *testing.T) {
 	c := client.Dial(t, addr)
 	login(c, user, pass)
 
+	// One body line each (the body is the line plus CRLF).
 	bodies := map[string]string{
-		"latin1": "caf\xe9 noir, na\xefve, \xe0 la carte\r\n",
-		"nul":    "before\x00after\r\n",
+		"latin1": "caf\xe9 noir, na\xefve, \xe0 la carte",
+		"nul":    "before\x00after",
 	}
 	// The headers column was TEXT too: the Latin-1 case also carries an 8-bit header line,
 	// which must come back from HEAD unchanged. (No NUL in a header: Parse refuses that.)
@@ -129,38 +130,25 @@ func TestRegressionO13EightBitArticlesPostgres(t *testing.T) {
 		}
 
 		msgid := "<o13-ihave-" + name + "@e2e.test>"
-		head := strings.Join(append([]string{
-			"Path: e2e-peer!not-for-mail",
-			"From: E2E Tester <e2e@example.invalid>",
-			"Newsgroups: " + group,
-			"Subject: 8-bit by IHAVE (" + name + ")",
-			"Date: " + nowDate(),
-			"Message-ID: " + msgid,
-		}, xh...), "\r\n") + "\r\n"
-		c.ExpectCmd(335, "IHAVE %s", msgid)
-		c.MustSend(dotStuff(head + "\r\n" + body))
-		if line := readStatus(t, c); !strings.HasPrefix(line, "235 ") {
+		art := testArticle(t, msgid, group, xh...).Set("Subject", "8-bit by IHAVE ("+name+")").SetBodyLines(body)
+		if line := transferred(t, "IHAVE "+msgid)(c.Ihave(msgid, art.Bytes())); !strings.HasPrefix(line, "235 ") {
 			t.Errorf("IHAVE %s: %q, want 235", msgid, line)
 		} else {
-			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(art.Body); got != want {
 				t.Errorf("BODY %s (IHAVE)\n got %q\nwant %q", msgid, got, want)
 			}
 			checkHead(msgid, "IHAVE", name)
 		}
 
 		msgid = "<o13-post-" + name + "@e2e.test>"
-		c.ExpectCmd(340, "POST")
-		post := append([]string{
-			"From: E2E Tester <e2e@example.invalid>",
-			"Newsgroups: " + group,
-			"Subject: 8-bit by POST (" + name + ")",
-			"Message-ID: " + msgid,
-		}, xh...)
-		c.MustSend(dotStuff(strings.Join(append(post, "", body), "\r\n")))
-		if line := readStatus(t, c); !strings.HasPrefix(line, "240 ") {
+		art = testPost(t, msgid, "8-bit by POST ("+name+")", body)
+		for _, x := range xh {
+			art.AddRaw(x)
+		}
+		if line := transferred(t, "POST")(c.Post(art.Bytes())); !strings.HasPrefix(line, "240 ") {
 			t.Errorf("POST %s: %q, want 240", msgid, line)
 		} else {
-			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+			if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(art.Body); got != want {
 				t.Errorf("BODY %s (POST)\n got %q\nwant %q", msgid, got, want)
 			}
 			checkHead(msgid, "POST", name)

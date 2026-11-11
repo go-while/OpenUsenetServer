@@ -4,8 +4,9 @@ package e2e
 
 // Regression tests for the findings in ISSUES.md. Each test starts with knownIssue while the
 // finding is open on main: it skips by default and fails with OUS_E2E_KNOWN_ISSUES=1 until the
-// fix branch named in ISSUES.md is merged. Articles are written as raw bytes here, because the
-// findings are about bytes the server changes.
+// fix branch named in ISSUES.md is merged. The findings are about bytes the server changes, so
+// the articles are the kit's article values (written and compared byte for byte, never
+// normalised), and the head of O-05, which the builder cannot write, is raw text.
 
 import (
 	"context"
@@ -14,47 +15,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-while/nntp-testkit/article"
 	"github.com/go-while/nntp-testkit/client"
 )
 
 // noPending is how long a test waits to see that the server sent nothing more.
 const noPending = 300 * time.Millisecond
 
-// dotStuff turns an article (CRLF lines, ending in CRLF) into what goes on the wire after
-// IHAVE/TAKETHIS/POST or comes back after 220/221/222: dot-stuffed, with ".\r\n" appended.
-func dotStuff(art string) string {
-	if strings.HasPrefix(art, ".") {
-		art = "." + art
-	}
-	return strings.ReplaceAll(art, "\r\n.", "\r\n..") + ".\r\n"
-}
+// dotStuff turns article bytes (CRLF lines, ending in CRLF) into what comes back after
+// 220/221/222 (and goes out after IHAVE/TAKETHIS/POST): dot-stuffed, with ".\r\n" appended.
+func dotStuff(art []byte) string { return string(client.StuffBytes(art)) }
 
 // nowDate is a Date header value the server's cutoff check accepts.
-func nowDate() string { return time.Now().UTC().Format(time.RFC1123Z) }
+func nowDate() string { return time.Now().UTC().Format(article.DateLayout) }
 
-// ihaveRaw offers art (exact bytes, CRLF lines) by IHAVE and expects 335, then want.
-func ihaveRaw(c *client.Conn, msgid, art string, want int) string {
-	c.ExpectCmd(335, "IHAVE %s", msgid)
-	c.MustSend(dotStuff(art))
-	return c.ExpectStatus(want, "IHAVE "+msgid)
-}
-
-// postArticle posts art (exact bytes, CRLF lines) and expects 340, then want.
-// TODO(nntp-testkit): replace with the kit's POST helper (code + line) once it exists.
-func postArticle(c *client.Conn, art string, want int) string {
-	c.ExpectCmd(340, "POST")
-	c.MustSend(dotStuff(art))
-	return c.ExpectStatus(want, "POST")
-}
-
-// readStatus reads the next status line (any code); it fails the test on a read error.
-func readStatus(t *testing.T, c *client.Conn) string {
-	t.Helper()
-	_, line, err := c.ReadStatus()
-	if err != nil {
-		t.Fatalf("status line: %v (%q)", err, line)
+// transferred returns the final reply line of c.Ihave, c.Takethis or c.Post and fails t when
+// the server answered before the article was sent (no 335 or 340): the caller checks the reply
+// to the article itself.
+func transferred(t *testing.T, what string) func(code int, line string, sent bool) string {
+	return func(_ int, line string, sent bool) string {
+		t.Helper()
+		if !sent {
+			t.Fatalf("%s: refused before the article was sent: %q", what, line)
+		}
+		return line
 	}
-	return line
 }
 
 // rawBlock sends cmd, expects code and returns the block exactly as sent by the server
@@ -117,13 +102,16 @@ func TestRegressionO05HeadKeptByteExact(t *testing.T) {
 		"X-Trace: one\r\n" +
 		"X-Trace: two\r\n"
 	body := "line one\r\n.dot line\r\n\r\nlast\r\n"
-	ihaveRaw(c, msgid, head+"\r\n"+body, 235)
+	// Parse keeps every byte (Parse(b).Bytes() == b): the article goes out as written.
+	art := article.Parse([]byte(head + "\r\n" + body))
+	c.ExpectIhave(235, msgid, art.Bytes())
 
-	wantHead := strings.Replace(head, "Path: e2e-peer!", "Path: "+pathhost+"!e2e-peer!", 1)
-	withXref := wantHead + "Xref: " + pathhost + " " + group + ":1\r\n"
+	// PrependPath changes nothing but the text after "Path: ".
+	want := art.Clone().PrependPath(pathhost)
+	withXref := want.Clone().AddRaw("Xref: " + pathhost + " " + group + ":1")
 	got := rawBlock(c, 220, "ARTICLE "+msgid)
-	if got != dotStuff(wantHead+"\r\n"+body) && got != dotStuff(withXref+"\r\n"+body) {
-		t.Fatalf("ARTICLE %s\n got %q\nwant %q", msgid, got, dotStuff(withXref+"\r\n"+body))
+	if got != dotStuff(want.Bytes()) && got != dotStuff(withXref.Bytes()) {
+		t.Fatalf("ARTICLE %s\n got %q\nwant %q", msgid, got, dotStuff(withXref.Bytes()))
 	}
 }
 
@@ -139,16 +127,13 @@ func TestRegressionO10ServedXref(t *testing.T) {
 	e.addGroup("local.other", "y")
 	c := e.dial()
 	msgid := "<o10-xref@e2e.test>"
-	body := "body line\r\n"
-	ihaveRaw(c, msgid, strings.Join([]string{
-		"Path: e2e-peer!not-for-mail",
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + group + ",local.other",
-		"Subject: served xref",
-		"Xref: e2e-peer.example " + group + ":99 local.other:98",
-		"Date: " + nowDate(),
-		"Message-ID: " + msgid,
-		"", body}, "\r\n"), 235)
+	// The peer's Xref in the middle of the head: after Subject, before Message-ID and Date.
+	art := testArticle(t, msgid, group+",local.other").
+		Set("Subject", "served xref").
+		Insert(4, "Xref: e2e-peer.example "+group+":99 local.other:98").
+		SetBodyLines("body line")
+	c.ExpectIhave(235, msgid, art.Bytes())
+	body := art.Body
 
 	// xrefs returns the Xref field lines of the head in lines (an article or a head).
 	xrefs := func(lines []string) []string {
@@ -206,30 +191,21 @@ func TestRegressionO15BareCRKept(t *testing.T) {
 	knownIssue(t, "O-15", "a bare CR becomes a line break")
 	e := startEnv(t)
 	c := e.dial()
-	body := "col1\rcol2 on one line\r\nnext line\r\n"
+	// The body is "col1\rcol2 on one line\r\nnext line\r\n": the CR stays inside the line.
+	lines := []string{"col1\rcol2 on one line", "next line"}
 
 	msgid := "<o15-ihave@e2e.test>"
-	ihaveRaw(c, msgid, strings.Join([]string{
-		"Path: e2e-peer!not-for-mail",
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + group,
-		"Subject: bare CR by IHAVE",
-		"Date: " + nowDate(),
-		"Message-ID: " + msgid,
-		"", body}, "\r\n"), 235)
-	if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+	art := testArticle(t, msgid, group).Set("Subject", "bare CR by IHAVE").SetBodyLines(lines...)
+	c.ExpectIhave(235, msgid, art.Bytes())
+	if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(art.Body); got != want {
 		t.Errorf("BODY %s (IHAVE)\n got %q\nwant %q", msgid, got, want)
 	}
 
 	login(c, user, pass)
 	msgid = "<o15-post@e2e.test>"
-	postArticle(c, strings.Join([]string{
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + group,
-		"Subject: bare CR by POST",
-		"Message-ID: " + msgid,
-		"", body}, "\r\n"), 240)
-	if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(body); got != want {
+	art = testPost(t, msgid, "bare CR by POST", lines...)
+	c.ExpectPost(240, art.Bytes())
+	if got, want := rawBlock(c, 222, "BODY "+msgid), dotStuff(art.Body); got != want {
 		t.Errorf("BODY %s (POST)\n got %q\nwant %q", msgid, got, want)
 	}
 }
@@ -243,14 +219,13 @@ func TestRegressionO16ColonlessHeaderRefused(t *testing.T) {
 	knownIssue(t, "O-16", "a header line without a colon is mangled")
 	e := startEnv(t)
 	c := e.dial()
-	head := func(msgid string) string {
-		return "From nobody Thu Dec  8 12:55:04 2016\r\n" +
-			"Path: e2e-peer!not-for-mail\r\n" +
-			"From: E2E Tester <e2e@example.invalid>\r\n" +
-			"Newsgroups: " + group + "\r\n" +
-			"Subject: head with an mbox From line\r\n" +
-			"Date: " + nowDate() + "\r\n" +
-			"Message-ID: " + msgid + "\r\n"
+	// The mbox line goes first, byte for byte (Insert writes it as given; the article package
+	// itself names it "From nobody Thu Dec  8 12", and ValidName is false).
+	art := func(msgid string) []byte {
+		return testArticle(t, msgid, group).
+			Set("Subject", "head with an mbox From line").
+			Insert(0, "From nobody Thu Dec  8 12:55:04 2016").
+			SetBodyLines("body").Bytes()
 	}
 	check := func(what, line, want string) {
 		t.Helper()
@@ -259,23 +234,19 @@ func TestRegressionO16ColonlessHeaderRefused(t *testing.T) {
 		}
 	}
 
+	// transferred: each refusal must answer the article (after 335/340), not the command.
 	ihaveID := "<o16-ihave@e2e.test>"
-	c.ExpectCmd(335, "IHAVE %s", ihaveID)
-	c.MustSend(dotStuff(head(ihaveID) + "\r\nbody\r\n"))
-	line := readStatus(t, c)
+	line := transferred(t, "IHAVE")(c.Ihave(ihaveID, art(ihaveID)))
 	check("IHAVE", line, "437 invalid header block")
 
 	c.ExpectCmd(203, "MODE STREAM")
 	takeID := "<o16-takethis@e2e.test>"
-	c.MustSend("TAKETHIS " + takeID + "\r\n" + dotStuff(head(takeID)+"\r\nbody\r\n"))
-	line = readStatus(t, c)
+	line = transferred(t, "TAKETHIS")(c.Takethis(takeID, art(takeID)))
 	check("TAKETHIS", line, "439 "+takeID+" invalid header block")
 
 	login(c, user, pass)
 	postID := "<o16-post@e2e.test>"
-	c.ExpectCmd(340, "POST")
-	c.MustSend(dotStuff(head(postID) + "\r\nbody\r\n"))
-	line = readStatus(t, c)
+	line = transferred(t, "POST")(c.Post(art(postID)))
 	check("POST", line, "441 invalid header block")
 
 	for _, id := range []string{ihaveID, takeID, postID} {
@@ -293,8 +264,7 @@ func TestRegressionO06TakethisReplyIDOnce(t *testing.T) {
 	c := e.dial()
 	c.ExpectCmd(203, "MODE STREAM")
 	msgid := "<o06-takethis@e2e.test>"
-	c.MustSend("TAKETHIS " + msgid + "\r\n" + client.Stuff(testArticle(msgid, group)))
-	line := c.ExpectStatus(239, "TAKETHIS "+msgid)
+	line := c.ExpectTakethis(239, msgid, testArticle(t, msgid, group).Bytes())
 	if !strings.HasPrefix(line, "239 "+msgid+" ") || strings.Count(line, msgid) != 1 {
 		t.Fatalf("TAKETHIS reply %q, want \"239 %s <text>\" with the id once", line, msgid)
 	}
@@ -310,17 +280,12 @@ func TestRegressionO11OverByMessageID(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	msgid := "<o11-over@e2e.test>"
-	art := strings.Join([]string{
-		"Path: e2e-peer!not-for-mail",
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + group,
-		"Subject: a\ttab in the subject",
-		"Date: " + nowDate(),
-		"Message-ID: " + msgid,
+	art := testArticle(t, msgid, group,
 		"X-Extra-1: a header OVER by message-id did not count",
-		"X-Extra-2: another one",
-		"", "body line 1", "body line 2", ""}, "\r\n")
-	ihaveRaw(c, msgid, art, 235)
+		"X-Extra-2: another one").
+		Set("Subject", "a\ttab in the subject").
+		SetBodyLines("body line 1", "body line 2")
+	c.ExpectIhave(235, msgid, art.Bytes())
 
 	// The article as served: its size in octets (CRLF counted, dot-stuffing not).
 	c.ExpectCmd(220, "ARTICLE %s", msgid)
@@ -363,12 +328,7 @@ func TestRegressionO12PostingAccount(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	msgid := "<o12-post@e2e.test>"
-	postArticle(c, strings.Join([]string{
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + group,
-		"Subject: posting account",
-		"Message-ID: " + msgid,
-		"", "body", ""}, "\r\n"), 240)
+	c.ExpectPost(240, testPost(t, msgid, "posting account", "body").Bytes())
 	c.ExpectCmd(221, "HEAD %s", msgid)
 	var got []string
 	for _, l := range c.ReadDotLines() {
@@ -384,8 +344,8 @@ func TestRegressionO12PostingAccount(t *testing.T) {
 
 // O-23: HDR without a range is about the current article (RFC 3977 8.5.2). In a group without
 // one, OUS answered "423 no articles in that range"; right is 420, as OVER answers. Fixed by
-// fix/hdr-no-current-article. nntp-testkit's no-current-article check covers it from the next
-// kit release on.
+// fix/hdr-no-current-article. nntp-testkit's no-current-article check covers it too since
+// v0.12.0 (conformance_test.go allows that failure while O-23 is open).
 func TestRegressionO23HdrWithoutCurrentArticle(t *testing.T) {
 	knownIssue(t, "O-23", "HDR without a range and no current article answers 423")
 	e := startEnv(t)
@@ -399,9 +359,7 @@ func TestRegressionO23HdrWithoutCurrentArticle(t *testing.T) {
 	// too; an explicit range only finds the number missing (423).
 	const msgid = "<o23-cancelled@e2e.test>"
 	login(c, user, pass)
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(testArticle(msgid, group)))
-	c.ExpectStatus(240, "POST")
+	c.ExpectPost(240, testArticle(t, msgid, group).Bytes())
 	c.ExpectCmd(211, "GROUP %s", group)
 	if removed, err := e.Store.CancelMessageID(context.Background(), msgid); err != nil || !removed {
 		t.Fatalf("cancel the current article: %v, %v", removed, err)

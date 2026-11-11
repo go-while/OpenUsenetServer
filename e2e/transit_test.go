@@ -18,7 +18,7 @@ import (
 	"time"
 
 	testkit "github.com/go-while/nntp-testkit"
-	"github.com/go-while/nntp-testkit/client"
+	"github.com/go-while/nntp-testkit/article"
 
 	"openusenet/internal/config"
 	"openusenet/internal/mail"
@@ -30,9 +30,7 @@ func TestTransitIHaveAcceptAndDuplicate(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	const msgid = "<transit-ihave@e2e.invalid>"
-	c.ExpectCmd(335, "IHAVE %s", msgid)
-	c.MustSend(client.Stuff(testArticle(msgid, group)))
-	c.ExpectStatus(235, "IHAVE article")
+	c.ExpectIhave(235, msgid, testArticle(t, msgid, group).Bytes())
 	c.ExpectCmd(220, "ARTICLE %s", msgid)
 	lines := c.ReadDotLines()
 	if !strings.Contains(strings.Join(lines, "\r\n"), "Path: "+pathhost+"!e2e-peer!not-for-mail\r\n") {
@@ -48,11 +46,8 @@ func TestTransitIHavePathLoop(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	const msgid = "<transit-path-loop@e2e.invalid>"
-	art := testArticle(msgid, group)
-	art[0] = "Path: " + pathhost + "!other!not-for-mail"
-	c.ExpectCmd(335, "IHAVE %s", msgid)
-	c.MustSend(client.Stuff(art))
-	c.ExpectStatus(437, "IHAVE with local Path hop")
+	art := testArticle(t, msgid, group).Set("Path", pathhost+"!other!not-for-mail")
+	c.ExpectIhave(437, msgid, art.Bytes()) // 437 after the article (335 first)
 	c.ExpectCmd(430, "ARTICLE %s", msgid)
 	if n, err := e.Store.CountArticles(context.Background()); err != nil || n != 0 {
 		t.Fatalf("path-loop article was stored: %d, %v", n, err)
@@ -67,8 +62,7 @@ func TestTransitCheckAndTakeThis(t *testing.T) {
 	if line := c.ExpectCmd(238, "CHECK %s", msgid); !strings.HasPrefix(line, "238 "+msgid+" ") {
 		t.Fatalf("CHECK reply does not identify the article: %q", line)
 	}
-	c.MustSend("TAKETHIS " + msgid + "\r\n" + client.Stuff(testArticle(msgid, group)))
-	if line := c.ExpectStatus(239, "TAKETHIS article"); !strings.HasPrefix(line, "239 "+msgid+" ") {
+	if line := c.ExpectTakethis(239, msgid, testArticle(t, msgid, group).Bytes()); !strings.HasPrefix(line, "239 "+msgid+" ") {
 		t.Fatalf("TAKETHIS reply does not identify the article: %q", line)
 	}
 	if line := c.ExpectCmd(438, "CHECK %s", msgid); !strings.HasPrefix(line, "438 "+msgid+" ") {
@@ -89,9 +83,7 @@ func TestTransitIHaveBannedGroup(t *testing.T) {
 	c := e.dial()
 	for i, groups := range []string{group, group + ",alt.test"} {
 		msgid := fmt.Sprintf("<transit-banned-%d@e2e.invalid>", i)
-		c.ExpectCmd(335, "IHAVE %s", msgid)
-		c.MustSend(client.Stuff(testArticle(msgid, groups)))
-		c.ExpectStatus(437, "IHAVE to banned group or crosspost")
+		c.ExpectIhave(437, msgid, testArticle(t, msgid, groups).Bytes()) // banned group or crosspost
 		c.ExpectCmd(430, "ARTICLE %s", msgid)
 		if n, err := e.Store.CountArticles(context.Background()); err != nil || n != 0 {
 			t.Fatalf("%s was stored despite a banned group: %d, %v", groups, n, err)
@@ -123,8 +115,7 @@ func TestTransitDeniedPeerTransferSendsOneReply(t *testing.T) {
 	}
 	c.ExpectCmd(111, "DATE")
 	// TAKETHIS must consume its article even when admission will be refused.
-	c.MustSend("TAKETHIS " + msgid + "\r\n" + client.Stuff(testArticle(msgid, group)))
-	if line = c.ExpectStatus(439, "denied TAKETHIS"); line != "439 "+msgid+" transfer not permitted from your address" {
+	if line = c.ExpectTakethis(439, msgid, testArticle(t, msgid, group).Bytes()); line != "439 "+msgid+" transfer not permitted from your address" {
 		t.Fatalf("TAKETHIS denial: %q", line)
 	}
 	if err := c.ExpectNoPending(50 * time.Millisecond); err != nil {
@@ -155,12 +146,9 @@ func TestTransitIHaveNewgroupControl(t *testing.T) {
 	c := e.dial()
 	const msgid = "<transit-newgroup@e2e.invalid>"
 	const newGroup = "demo.control.test"
-	art := testArticle(msgid, "control.newgroup", "Control: newgroup "+newGroup)
-	// Replace the standard body with the newgroup description payload.
-	art = append(art[:len(art)-2], "For your newsgroups file:", newGroup+"\tDemo control-created group")
-	c.ExpectCmd(335, "IHAVE %s", msgid)
-	c.MustSend(client.Stuff(art))
-	c.ExpectStatus(235, "IHAVE newgroup control")
+	art := testArticle(t, msgid, "control.newgroup", "Control: newgroup "+newGroup).
+		SetBodyLines("For your newsgroups file:", newGroup+"\tDemo control-created group")
+	c.ExpectIhave(235, msgid, art.Bytes())
 	g, err := e.Store.GetGroup(context.Background(), newGroup)
 	if err != nil || g == nil {
 		t.Fatalf("control-created group missing: %+v, %v", g, err)
@@ -177,10 +165,9 @@ func TestTransitPostMailsModeratedGroup(t *testing.T) {
 	e.addGroup(moderatedGroup, "m")
 	c := e.dial()
 	login(c, user, pass)
-	plain := []string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: please approve", "", "hello"}
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(plain))
-	if line := c.ExpectStatus(441, "unconfigured moderator mail"); !strings.Contains(line, "mail server is not configured") {
+	plain := article.ParseLines([]string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: please approve", "", "hello"}).Bytes()
+	// unconfigured moderator mail: 441 after the article
+	if line := c.ExpectPost(441, plain); !strings.Contains(line, "mail server is not configured") {
 		t.Fatalf("unconfigured mail error: %q", line)
 	}
 	if n, err := e.Store.CountArticles(context.Background()); err != nil || n != 0 {
@@ -206,9 +193,7 @@ func TestTransitPostMailsModeratedGroup(t *testing.T) {
 		}
 	})
 	t.Cleanup(restore)
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(plain))
-	if line := c.ExpectStatus(240, "moderated submission"); !strings.Contains(line, "mailed to moderator for "+moderatedGroup) {
+	if line := c.ExpectPost(240, plain); !strings.Contains(line, "mailed to moderator for "+moderatedGroup) {
 		t.Fatalf("moderator submission reply: %q", line)
 	}
 	select {
@@ -226,10 +211,8 @@ func TestTransitPostMailsModeratedGroup(t *testing.T) {
 		t.Fatalf("mailed article was also stored: %d, %v", n, err)
 	}
 	const approvedID = "<transit-approved@e2e.invalid>"
-	approved := []string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: approved", "Approved: moderator@example.invalid", "Message-ID: " + approvedID, "", "kept"}
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(approved))
-	if line := c.ExpectStatus(240, "approved moderated article"); strings.Contains(line, "mailed") {
+	approved := article.ParseLines([]string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: approved", "Approved: moderator@example.invalid", "Message-ID: " + approvedID, "", "kept"})
+	if line := c.ExpectPost(240, approved.Bytes()); strings.Contains(line, "mailed") {
 		t.Fatalf("approved article was mailed: %q", line)
 	}
 	c.ExpectCmd(220, "ARTICLE %s", approvedID)
@@ -237,10 +220,9 @@ func TestTransitPostMailsModeratedGroup(t *testing.T) {
 	if n, err := e.Store.CountArticles(context.Background()); err != nil || n != 1 {
 		t.Fatalf("approved article not stored exactly once: %d, %v", n, err)
 	}
-	dup := []string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: again", "Message-ID: " + approvedID, "", "again"}
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(dup))
-	if line := c.ExpectStatus(441, "duplicate moderated article"); !strings.Contains(line, "duplicate") {
+	dup := article.ParseLines([]string{"From: tester@example.invalid", "Newsgroups: " + moderatedGroup, "Subject: again", "Message-ID: " + approvedID, "", "again"})
+	// duplicate moderated article: 441 after the article
+	if line := c.ExpectPost(441, dup.Bytes()); !strings.Contains(line, "duplicate") {
 		t.Fatalf("duplicate moderation reply: %q", line)
 	}
 	select {
@@ -264,9 +246,7 @@ func TestTransitIHaveUnapprovedModeratedStaysStored(t *testing.T) {
 	}))
 	c := e.dial()
 	const msgid = "<transit-unapproved@e2e.invalid>"
-	c.ExpectCmd(335, "IHAVE %s", msgid)
-	c.MustSend(client.Stuff(testArticle(msgid, moderatedGroup)))
-	c.ExpectStatus(235, "unapproved moderated article in transit")
+	c.ExpectIhave(235, msgid, testArticle(t, msgid, moderatedGroup).Bytes()) // unapproved, in transit
 	if mailed.Load() {
 		t.Fatal("transit article was mailed to a moderator")
 	}
@@ -297,10 +277,8 @@ func TestTransitPOSTFeedsIHAVE(t *testing.T) {
 	c := sender.dial()
 	login(c, user, pass)
 	const msgid = "<transit-two-servers@e2e.invalid>"
-	art := []string{"From: tester@example.invalid", "Newsgroups: " + group, "Subject: mesh", "Message-ID: " + msgid, "", "hello peers", ".dot-stuffed peer body"}
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(art))
-	c.ExpectStatus(240, "POST to sending server")
+	art := article.ParseLines([]string{"From: tester@example.invalid", "Newsgroups: " + group, "Subject: mesh", "Message-ID: " + msgid, "", "hello peers", ".dot-stuffed peer body"})
+	c.ExpectPost(240, art.Bytes()) // to the sending server
 	testkit.WaitFor(t, 0, "article relayed to receiving OUS server", func() bool {
 		ok, err := receiver.Store.HasMessageID(context.Background(), msgid)
 		if err != nil {

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	testkit "github.com/go-while/nntp-testkit"
+	"github.com/go-while/nntp-testkit/article"
 	"github.com/go-while/nntp-testkit/client"
 
 	"openusenet/internal/auth"
@@ -32,6 +33,7 @@ const (
 	user     = "e2euser"
 	pass     = "e2e-secret-pass"
 	pathhost = "e2e.test"
+	testFrom = "E2E Tester <e2e@example.invalid>"
 )
 
 // env is one running server with its store.
@@ -159,19 +161,40 @@ func knownIssue(t *testing.T, id, what string) {
 	}
 }
 
-// testArticle returns an article as CRLF lines without the final line end and without the
-// dot terminator; extra are added header lines ("Name: value"). Send it with client.Stuff
-// (lines) or as raw bytes plus "\r\n.\r\n" when the test needs exact bytes.
-// TODO(nntp-testkit): replace with the kit's article builder once it exists.
-func testArticle(msgid, newsgroups string, extra ...string) []string {
-	h := []string{
-		"Path: e2e-peer!not-for-mail",
-		"From: E2E Tester <e2e@example.invalid>",
-		"Newsgroups: " + newsgroups,
-		"Subject: e2e " + strings.Trim(msgid, "<>"),
-		"Date: " + time.Now().UTC().Format(time.RFC1123Z),
-		"Message-ID: " + msgid,
+// testArticle returns the article the e2e tests offer by IHAVE or TAKETHIS (and post), built
+// with the kit's article.New: Path "e2e-peer!not-for-mail", From, Newsgroups, Subject
+// "e2e <msgid without brackets>", Message-ID, Date (now, UTC), then the extra header lines
+// (each written as given), the empty line and the body lines "e2e body line 1" and
+// "e2e body line 2". Edit the result (Set, Insert, SetBodyLines ...) and send a.Bytes() with
+// c.ExpectIhave, c.ExpectTakethis or c.ExpectPost.
+func testArticle(tb testing.TB, msgid, newsgroups string, extra ...string) *article.Article {
+	tb.Helper()
+	return article.New(tb, article.Options{
+		Newsgroups: newsgroups,
+		PathHost:   "e2e-peer",
+		From:       testFrom,
+		Subject:    "e2e " + strings.Trim(msgid, "<>"),
+		MessageID:  msgid,
+		Extra:      extra,
+		Body:       []string{"e2e body line 1", "e2e body line 2"},
+	})
+}
+
+// testPost returns an article as a newsreader posts it to group local.test: From,
+// Newsgroups, Subject, Message-ID, the empty line and the body lines; no Path and no Date (the
+// server adds them). msgid "" leaves out the Message-ID as well, so the server injects one.
+func testPost(tb testing.TB, msgid, subject string, body ...string) *article.Article {
+	tb.Helper()
+	omit := []string{"Path", "Date"}
+	if msgid == "" {
+		omit = append(omit, "Message-ID")
 	}
-	h = append(h, extra...)
-	return append(h, "", "e2e body line 1", "e2e body line 2")
+	return article.New(tb, article.Options{
+		Newsgroups: group,
+		From:       testFrom,
+		Subject:    subject,
+		MessageID:  msgid,
+		Omit:       omit,
+		Body:       body,
+	})
 }

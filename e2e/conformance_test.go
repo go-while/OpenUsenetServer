@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-while/nntp-testkit/client"
 	"github.com/go-while/nntp-testkit/conformance"
 )
 
@@ -49,9 +48,7 @@ func TestConformance(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	for i := 1; i <= 3; i++ {
-		c.ExpectCmd(340, "POST")
-		c.MustSend(client.Stuff(testArticle(fmt.Sprintf("<conformance-seed-%d@e2e.test>", i), group)))
-		c.ExpectStatus(240, "POST seed article")
+		c.ExpectPost(240, testArticle(t, fmt.Sprintf("<conformance-seed-%d@e2e.test>", i), group).Bytes())
 	}
 	c.Close()
 	var skip []string

@@ -3,7 +3,7 @@
 package e2e
 
 // Outgoing feeder tests: articles POSTed to OpenUsenetServer are offered to fake transit
-// peers (nntp-testkit's fakeserver.PeerHandler, or a local handler where the kit has none).
+// peers (nntp-testkit's fakeserver.NewPeer, a PeerHandler with the knobs each test needs).
 //
 // The feeder delivers asynchronously (Offer enqueues, then a drain goroutine connects), so
 // every test waits for a count with testkit.WaitFor and then asserts exact counts. A test that
@@ -14,16 +14,16 @@ package e2e
 // excluded one can no longer come.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"slices"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	testkit "github.com/go-while/nntp-testkit"
+	"github.com/go-while/nntp-testkit/article"
 	"github.com/go-while/nntp-testkit/client"
 	"github.com/go-while/nntp-testkit/fakeserver"
 
@@ -34,33 +34,15 @@ import (
 // passing test never waits on it.
 func feedWait() time.Duration { return max(testkit.Deadline(), 30*time.Second) }
 
-// newPeerServer starts a fake transit peer with the kit's PeerHandler.
+// newPeerServer starts a fake transit peer (the kit's PeerHandler) with the default greeting.
 func newPeerServer(t *testing.T, o *fakeserver.PeerOptions) *fakeserver.Server {
 	t.Helper()
-	return fakeserver.New(t, fakeserver.Options{Handler: fakeserver.PeerHandler(o)})
+	return fakeserver.NewPeer(t, fakeserver.Options{}, o)
 }
 
 // peerOf returns an enabled store.Peer that points at srv and takes every group.
 func peerOf(name string, srv *fakeserver.Server) store.Peer {
 	return store.Peer{Name: name, Host: srv.Host(), Port: srv.Port(), Patterns: "*", Enabled: true}
-}
-
-// post sends art with POST on c and expects 240.
-func post(c *client.Conn, art []string) {
-	c.ExpectCmd(340, "POST")
-	c.MustSend(client.Stuff(art))
-	c.ExpectStatus(240, "POST")
-}
-
-// withPath returns art with its Path header replaced by path.
-func withPath(art []string, path string) []string {
-	out := slices.Clone(art)
-	for i, l := range out {
-		if strings.HasPrefix(l, "Path: ") {
-			out[i] = "Path: " + path
-		}
-	}
-	return out
 }
 
 // queueDepth is the number of items in the feed queue (claimed or not).
@@ -81,64 +63,40 @@ func (e *env) waitDelivered(t *testing.T, srv *fakeserver.Server, n int) {
 	})
 }
 
-// unstuff removes the dot-stuffing of wire lines (RFC 3977 3.1.1).
-func unstuff(wire []string) []string {
-	out := make([]string, len(wire))
-	for i, l := range wire {
-		out[i] = strings.TrimPrefix(l, ".")
-	}
-	return out
-}
-
-// splitArticle splits article lines at the first empty line.
-func splitArticle(lines []string) (head, body []string) {
-	if i := slices.Index(lines, ""); i >= 0 {
-		return lines[:i], lines[i+1:]
-	}
-	return lines, nil
-}
-
-// header returns the value of the first header name in head ("" if absent).
-func header(head []string, name string) string {
-	for _, l := range head {
-		if k, v, ok := strings.Cut(l, ":"); ok && strings.EqualFold(k, name) {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
 // msgIDsOf returns the Message-IDs of the articles srv received, in arrival order.
 func msgIDsOf(srv *fakeserver.Server) []string {
 	var ids []string
-	for _, a := range srv.Articles() {
-		h, _ := splitArticle(unstuff(a))
-		ids = append(ids, header(h, "Message-ID"))
+	for _, raw := range srv.ArticlesRaw() {
+		ids = append(ids, article.ParseDotBlock(raw).MessageID())
 	}
 	return ids
 }
 
-// checkArticle compares a received article with the one posted: same Message-ID, Path with
-// our path host prepended, and the body byte for byte (after dot-unstuffing).
-func checkArticle(t *testing.T, wire, posted []string) {
+// checkArticle compares an article the peer received (an element of ArticlesRaw: the bytes the
+// feeder wrote, still dot-stuffed, without the terminator) with the one posted: same
+// Message-ID, our path host prepended to the posted Path, and the body byte for byte as it went
+// over the wire: the posted body dot-stuffed (client.StuffBytes), CRLF line ends included.
+func checkArticle(t *testing.T, raw []byte, posted *article.Article) {
 	t.Helper()
-	gotHead, gotBody := splitArticle(unstuff(wire))
-	wantHead, wantBody := splitArticle(posted)
-	if got, want := header(gotHead, "Message-ID"), header(wantHead, "Message-ID"); got != want {
+	recv := article.ParseDotBlock(raw)
+	if got, want := recv.MessageID(), posted.MessageID(); got != want {
 		t.Errorf("Message-ID = %q, want %q", got, want)
 	}
 	// The server prepends its own hop and keeps the posted Path behind it.
-	if got, want := header(gotHead, "Path"), pathhost+"!"+header(wantHead, "Path"); got != want {
+	if got, want := recv.Get("Path"), posted.Clone().PrependPath(pathhost).Get("Path"); got != want {
 		t.Errorf("Path = %q, want %q", got, want)
 	}
-	if !slices.Equal(gotBody, wantBody) {
-		t.Errorf("body = %q, want %q", gotBody, wantBody)
+	_, gotBody, _ := bytes.Cut(raw, []byte("\r\n\r\n"))
+	wantBody := bytes.TrimSuffix(client.StuffBytes(posted.Body), []byte(".\r\n"))
+	if !bytes.Equal(gotBody, wantBody) {
+		t.Errorf("body on the wire = %q, want %q", gotBody, wantBody)
 	}
 }
 
 // bodyArticle is testArticle with body lines that need dot-stuffing on the wire.
-func bodyArticle(msgid string) []string {
-	return append(testArticle(msgid, group), ".leading dot", "..two dots", ".", "last line")
+func bodyArticle(t *testing.T, msgid string) *article.Article {
+	a := testArticle(t, msgid, group)
+	return a.SetBodyLines(append(a.BodyLines(), ".leading dot", "..two dots", ".", "last line")...)
 }
 
 func TestFeedStreamingCheckTakethis(t *testing.T) {
@@ -148,11 +106,11 @@ func TestFeedStreamingCheckTakethis(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	art := bodyArticle("<feed-stream-1@e2e.test>")
-	post(c, art)
+	art := bodyArticle(t, "<feed-stream-1@e2e.test>")
+	c.ExpectPost(240, art.Bytes())
 
 	e.waitDelivered(t, srv, 1)
-	arts := srv.Articles()
+	arts := srv.ArticlesRaw()
 	if len(arts) != 1 {
 		t.Fatalf("peer got %d articles, want 1", len(arts))
 	}
@@ -176,11 +134,11 @@ func TestFeedIHAVEWithoutStreaming(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	art := bodyArticle("<feed-ihave-1@e2e.test>")
-	post(c, art)
+	art := bodyArticle(t, "<feed-ihave-1@e2e.test>")
+	c.ExpectPost(240, art.Bytes())
 
 	e.waitDelivered(t, srv, 1)
-	arts := srv.Articles()
+	arts := srv.ArticlesRaw()
 	if len(arts) != 1 {
 		t.Fatalf("peer got %d articles, want 1", len(arts))
 	}
@@ -205,10 +163,9 @@ func TestFeedSkipsPeerInPath(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	post(c, withPath(testArticle("<feed-path-token@e2e.test>", group), "hub.example!origin.example!not-for-mail"))
-	post(c, withPath(testArticle("<feed-path-name@e2e.test>", group), "feedpeer!origin.example!not-for-mail"))
-	ctl := testArticle("<feed-path-control@e2e.test>", group)
-	post(c, ctl)
+	c.ExpectPost(240, testArticle(t, "<feed-path-token@e2e.test>", group).Set("Path", "hub.example!origin.example!not-for-mail").Bytes())
+	c.ExpectPost(240, testArticle(t, "<feed-path-name@e2e.test>", group).Set("Path", "feedpeer!origin.example!not-for-mail").Bytes())
+	c.ExpectPost(240, testArticle(t, "<feed-path-control@e2e.test>", group).Bytes())
 
 	e.waitDelivered(t, srv, 1)
 	if ids := msgIDsOf(srv); !slices.Equal(ids, []string{"<feed-path-control@e2e.test>"}) {
@@ -239,8 +196,8 @@ func TestFeedPatternsExcludeGroup(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	post(c, testArticle("<feed-pat-test@e2e.test>", group))
-	post(c, testArticle("<feed-pat-other@e2e.test>", other))
+	c.ExpectPost(240, testArticle(t, "<feed-pat-test@e2e.test>", group).Bytes())
+	c.ExpectPost(240, testArticle(t, "<feed-pat-other@e2e.test>", other).Bytes())
 
 	e.waitDelivered(t, want, 1)
 	e.waitDelivered(t, excl, 1)
@@ -268,8 +225,8 @@ func TestFeedHaveNotResent(t *testing.T) {
 
 	c := e.dial()
 	login(c, user, pass)
-	post(c, testArticle(had, group))
-	post(c, testArticle("<feed-have-control@e2e.test>", group))
+	c.ExpectPost(240, testArticle(t, had, group).Bytes())
+	c.ExpectPost(240, testArticle(t, "<feed-have-control@e2e.test>", group).Bytes())
 
 	e.waitDelivered(t, srv, 1)
 	testkit.WaitFor(t, feedWait(), "CHECK of both articles", func() bool { return srv.Count("CHECK") >= 2 })
@@ -306,7 +263,7 @@ func TestFeedPersistentConnection(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	for i := range n {
-		post(c, testArticle(fmt.Sprintf("<feed-persist-%d@e2e.test>", i), group))
+		c.ExpectPost(240, testArticle(t, fmt.Sprintf("<feed-persist-%d@e2e.test>", i), group).Bytes())
 	}
 	e.waitDelivered(t, srv, n)
 	if got := len(srv.Articles()); got != n {
@@ -317,86 +274,30 @@ func TestFeedPersistentConnection(t *testing.T) {
 	}
 }
 
-// diabloPeer answers like Diablo's feeder port: CAPABILITIES is unknown (500), MODE STREAM
-// gives 203, then CHECK/TAKETHIS (and IHAVE).
-// TODO(nntp-testkit): PeerOptions knob for a peer without CAPABILITIES (or Faults.Override
-// applied to PeerHandler) would replace this handler.
-func diabloPeer(c *fakeserver.Conn, line string) ([]string, bool) {
-	verb, arg, _ := strings.Cut(line, " ")
-	switch strings.ToUpper(verb) {
-	case "CAPABILITIES":
-		return []string{"500 Syntax error or bad command"}, false
-	case "MODE":
-		if strings.EqualFold(arg, "STREAM") {
-			return []string{"203 StreamOK."}, false
-		}
-	case "CHECK":
-		return []string{"238 " + arg}, false
-	case "TAKETHIS":
-		if _, err := c.ReadDotBlock(); err != nil {
-			return nil, true
-		}
-		return []string{"239 " + arg}, false
-	case "IHAVE":
-		if err := c.WriteLines("335 " + arg); err != nil {
-			return nil, true
-		}
-		if _, err := c.ReadDotBlock(); err != nil {
-			return nil, true
-		}
-		return []string{"235 " + arg}, false
-	case "QUIT":
-		return []string{"205 bye"}, true
-	}
-	return []string{"500 Syntax error or bad command"}, false
-}
-
 // O-18: a peer whose CAPABILITIES fails (Diablo: 500) but that streams after MODE STREAM
 // (203) should get CHECK/TAKETHIS; the feeder never tries MODE STREAM and falls back to IHAVE.
 func TestFeedModeStreamFallback(t *testing.T) {
 	knownIssue(t, "O-18", "no MODE STREAM fallback when CAPABILITIES fails")
 	e := startEnv(t)
-	srv := fakeserver.New(t, fakeserver.Options{
-		Greeting: "200 diablo-like server ready",
-		Handler:  fakeserver.LineHandler(diabloPeer),
+	// Diablo's feeder port: CAPABILITIES is unknown (500), MODE STREAM gives 203, then
+	// CHECK/TAKETHIS (and IHAVE) as usual.
+	srv := fakeserver.NewPeer(t, fakeserver.Options{Greeting: "200 diablo-like server ready"}, &fakeserver.PeerOptions{
+		CapabilitiesReply: []string{"500 Syntax error or bad command"},
+		ModeStreamReply:   []string{"203 StreamOK."},
 	})
 	e.addPeer(peerOf("diablopeer", srv))
 
 	c := e.dial()
 	login(c, user, pass)
-	art := bodyArticle("<feed-modestream-1@e2e.test>")
-	post(c, art)
+	art := bodyArticle(t, "<feed-modestream-1@e2e.test>")
+	c.ExpectPost(240, art.Bytes())
 
 	e.waitDelivered(t, srv, 1)
-	checkArticle(t, srv.Articles()[0], art)
+	checkArticle(t, srv.ArticlesRaw()[0], art)
 	n := srv.Counts()
 	if !slices.Contains(srv.Lines(), "MODE STREAM") || n["TAKETHIS"] != 1 || n["IHAVE"] != 0 {
 		t.Errorf("MODE=%d CHECK=%d TAKETHIS=%d IHAVE=%d, want MODE STREAM then CHECK/TAKETHIS and no IHAVE (lines %q)",
 			n["MODE"], n["CHECK"], n["TAKETHIS"], n["IHAVE"], srv.Lines())
-	}
-}
-
-// gate holds connections until it is opened.
-type gate struct {
-	ch   chan struct{}
-	once sync.Once
-}
-
-func newGate() *gate  { return &gate{ch: make(chan struct{})} }
-func (g *gate) open() { g.once.Do(func() { close(g.ch) }) }
-func (g *gate) wait() { <-g.ch }
-
-// heldPeer wraps inner: each connection waits for g before its greeting (use with
-// Options.NoGreeting), so every connection the feeder opens stays open until the test opens
-// the gate. The kit's PeerHandler writes with WriteLines, so Faults.Delay does not apply to it.
-// TODO(nntp-testkit): gated PeerHandler
-func heldPeer(g *gate, inner func(*fakeserver.Conn)) func(*fakeserver.Conn) {
-	return func(c *fakeserver.Conn) {
-		g.wait()
-		if err := c.WriteLines(fakeserver.DefaultGreeting); err != nil {
-			return
-		}
-		inner(c)
 	}
 }
 
@@ -407,48 +308,34 @@ func heldPeer(g *gate, inner func(*fakeserver.Conn)) func(*fakeserver.Conn) {
 func TestFeedParallelBound(t *testing.T) {
 	knownIssue(t, "O-20", "unbounded parallel feeder connections to one peer")
 	e := startEnv(t)
-	g := newGate()
-	srv := fakeserver.New(t, fakeserver.Options{
-		NoGreeting: true,
-		Handler:    heldPeer(g, fakeserver.PeerHandler(&fakeserver.PeerOptions{})),
-	})
-	t.Cleanup(g.open) // runs before srv.Close (cleanups run last-in first-out)
+	// Every connection the feeder opens waits for its greeting, and stays open, until the test
+	// closes hold (HoldGreeting; srv.Close at cleanup drops connections still held).
+	hold := make(chan struct{})
+	srv := fakeserver.NewPeer(t, fakeserver.Options{}, &fakeserver.PeerOptions{HoldGreeting: hold})
 	e.addPeer(peerOf("parallelpeer", srv))
 
 	const n, bound = 16, 4
 	c := e.dial()
 	login(c, user, pass)
 	for i := range n {
-		post(c, testArticle(fmt.Sprintf("<feed-o20-%d@e2e.test>", i), group))
+		c.ExpectPost(240, testArticle(t, fmt.Sprintf("<feed-o20-%d@e2e.test>", i), group).Bytes())
 	}
 	// Hold the connections until more than bound are open, or for a hold window when a
 	// bounded feeder never opens that many. The window is not an assertion (a bounded feeder
-	// passes however long it lasts); it stays below the feeder's 15 s read timeout.
+	// passes however long it lasts); it stays below the feeder's 15 s read timeout (and the
+	// kit's Deadline, after which a held connection is dropped).
 	testkit.WaitFor(t, feedWait(), "a first held connection", func() bool { return srv.Open() >= 1 })
-	hold := time.Now().Add(5 * time.Second)
-	for srv.Open() <= bound && time.Now().Before(hold) {
+	until := time.Now().Add(5 * time.Second)
+	for srv.Open() <= bound && time.Now().Before(until) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	held := srv.Open()
-	g.open()
+	close(hold)
 
 	e.waitDelivered(t, srv, n)
 	if m := srv.MaxOpen(); m > bound {
 		t.Errorf("MaxOpen() = %d (held at once: %d), want at most %d parallel connections to one peer (Accepted %d, %d articles)",
 			m, held, bound, srv.Accepted(), n)
-	}
-}
-
-// delayedPeer wraps inner: each connection gets its greeting after d (use with
-// Options.NoGreeting).
-// TODO(nntp-testkit): gated PeerHandler (or Faults.Delay for the greeting of a Handler)
-func delayedPeer(d time.Duration, inner func(*fakeserver.Conn)) func(*fakeserver.Conn) {
-	return func(c *fakeserver.Conn) {
-		time.Sleep(d)
-		if err := c.WriteLines(fakeserver.DefaultGreeting); err != nil {
-			return
-		}
-		inner(c)
 	}
 }
 
@@ -466,10 +353,7 @@ func TestFeedLeaseNoDuplicates(t *testing.T) {
 	const peers, delay = 30, 5 * time.Second
 	var srvs []*fakeserver.Server
 	for i := range peers {
-		srv := fakeserver.New(t, fakeserver.Options{
-			NoGreeting: true,
-			Handler:    delayedPeer(delay, fakeserver.PeerHandler(&fakeserver.PeerOptions{})),
-		})
+		srv := fakeserver.NewPeer(t, fakeserver.Options{}, &fakeserver.PeerOptions{GreetingDelay: delay})
 		srvs = append(srvs, srv)
 		e.addPeer(peerOf(fmt.Sprintf("leasepeer%02d", i), srv))
 	}
@@ -477,7 +361,7 @@ func TestFeedLeaseNoDuplicates(t *testing.T) {
 	c := e.dial()
 	login(c, user, pass)
 	const id = "<feed-o21-1@e2e.test>"
-	post(c, testArticle(id, group))
+	c.ExpectPost(240, testArticle(t, id, group).Bytes())
 
 	slow := max(testkit.Deadline(), 8*time.Minute)
 	testkit.WaitFor(t, slow, "the article at every peer, an empty queue and no open feeder connection", func() bool {

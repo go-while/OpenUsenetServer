@@ -6,17 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-while/nntp-testkit/client"
+	"github.com/go-while/nntp-testkit/article"
 )
-
-// postRaw sends POST and the raw article (CRLF lines, dot-stuffed, ending in "\r\n.\r\n")
-// on a logged-in c and returns the final status line, which must carry code want.
-// TODO(nntp-testkit): replace with the kit's POST helper (code + line) once it exists.
-func postRaw(c *client.Conn, want int, raw string) string {
-	c.ExpectCmd(340, "POST")
-	c.MustSend(raw)
-	return c.ExpectStatus(want, "POST")
-}
 
 // A POST without a From header is refused with 441 and nothing is stored.
 // (Ported from the unit test of article.InjectForPost: here it is checked on the wire.)
@@ -24,7 +15,14 @@ func TestPostInjectRequiresFrom(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	login(c, user, pass)
-	line := postRaw(c, 441, "Newsgroups: "+group+"\r\nSubject: x\r\n\r\nbody\r\n.\r\n")
+	art := article.New(t, article.Options{
+		Newsgroups: group,
+		Subject:    "x",
+		Omit:       []string{"Path", "From", "Message-ID", "Date"},
+		Body:       []string{"body"},
+	})
+	// ExpectPost: the 441 must come after the article (340 first), not instead of the 340.
+	line := c.ExpectPost(441, art.Bytes())
 	if !strings.Contains(strings.ToLower(line), "from") {
 		t.Fatalf("441 should name the missing From header: %q", line)
 	}

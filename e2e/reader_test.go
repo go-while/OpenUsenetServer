@@ -82,12 +82,7 @@ func TestGroupListPostArticle(t *testing.T) {
 	c.ExpectCmd(411, "GROUP missing.group")
 
 	login(c, user, pass)
-	postRaw(c, 240, "From: tester@example.com\r\n"+
-		"Newsgroups: "+group+"\r\n"+
-		"Subject: hello\r\n"+
-		"\r\n"+
-		"body line\r\n"+
-		".\r\n")
+	c.ExpectPost(240, testPost(t, "", "hello", "body line").Bytes()) // no Message-ID: injected
 
 	if g := strings.Fields(c.ExpectCmd(211, "GROUP %s", group)); len(g) < 5 || g[1] != "1" || g[4] != group {
 		t.Fatalf("GROUP should report 1 article in %s: %q", group, g)
@@ -121,8 +116,8 @@ func TestFetchByMsgidDoesNotChangeCurrent(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	login(c, user, pass)
-	postRaw(c, 240, "From: a@b.c\r\nNewsgroups: "+group+"\r\nSubject: one\r\n\r\nx\r\n.\r\n")
-	postRaw(c, 240, "From: a@b.c\r\nNewsgroups: "+group+"\r\nSubject: two\r\n\r\ny\r\n.\r\n")
+	c.ExpectPost(240, testPost(t, "", "one", "x").Bytes())
+	c.ExpectPost(240, testPost(t, "", "two", "y").Bytes())
 
 	c.ExpectCmd(211, "GROUP %s", group)
 	msgid := func(n int) string {
@@ -150,7 +145,7 @@ func TestPipelinedGroupStat(t *testing.T) {
 	e := startEnv(t)
 	c := e.dial()
 	login(c, user, pass)
-	postRaw(c, 240, "From: a@b.c\r\nNewsgroups: "+group+"\r\nSubject: p\r\n\r\nz\r\n.\r\n")
+	c.ExpectPost(240, testPost(t, "", "p", "z").Bytes())
 	c.MustSend("GROUP " + group + "\r\nSTAT\r\n")
 	c.ExpectStatus(211, "GROUP")
 	c.ExpectStatus(223, "STAT")
