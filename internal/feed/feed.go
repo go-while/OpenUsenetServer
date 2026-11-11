@@ -61,7 +61,7 @@ func New(cfg config.Config, peers PeerSource, arts ArticleSource, lg *log.Logger
 		lg = log.Default()
 	}
 	return &Feeder{cfg: cfg, peers: peers, arts: arts, log: lg, timeout: 15 * time.Second,
-		tick: 5 * time.Second, lease: 2 * time.Minute, window: 1, idleFor: time.Minute}
+		tick: 5 * time.Second, lease: 2 * time.Minute, window: 16, idleFor: time.Minute}
 }
 
 // Offer enqueues the article for peers whose Path/patterns/flags allow it.

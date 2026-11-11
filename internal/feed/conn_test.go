@@ -156,6 +156,14 @@ func (p *feedPeer) serve(c net.Conn) {
 		case "CHECK":
 			if checks++; checks == 1 && p.firstCheck > 0 {
 				time.Sleep(p.firstCheck)
+				// Pull everything sent so far into r (until 50 ms without more).
+				for {
+					_ = c.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+					if _, err := r.Peek(r.Buffered() + 1); err != nil {
+						break
+					}
+				}
+				_ = c.SetReadDeadline(time.Time{})
 				peek, _ := r.Peek(r.Buffered())
 				p.mu.Lock()
 				p.ahead = append(p.ahead, bytes.Count(peek, []byte("\n")))

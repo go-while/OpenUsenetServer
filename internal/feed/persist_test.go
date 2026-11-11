@@ -2,14 +2,86 @@ package feed
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"openusenet/internal/store"
 )
 
 // closeFeeder closes the connections f keeps open for the next drain.
 func closeFeeder(f *Feeder) { f.closeIdle() }
+
+// forWindows runs fn in order (window 1) and pipelined (window 16).
+func forWindows(t *testing.T, fn func(t *testing.T, window int)) {
+	for _, w := range []int{1, 16} {
+		t.Run(fmt.Sprintf("window=%d", w), func(t *testing.T) { fn(t, w) })
+	}
+}
+
+// CHECKs are pipelined: with 32 articles, the peer holds its first reply and finds the
+// other 15 CHECKs of the window already sent, and not more (the window bounds them).
+func TestDrainPipelinesChecks(t *testing.T) {
+	p := &feedPeer{firstCheck: 150 * time.Millisecond}
+	p.start(t)
+	q := newFakeQueue(p.peer(1), 2*time.Minute)
+	f := newTestFeeder(q)
+	t.Cleanup(func() { closeFeeder(f) })
+	if f.window != 16 {
+		t.Fatalf("default window %d, want 16", f.window)
+	}
+
+	const n = 32 // one claim
+	enqueue(t, q, "pipe", n)
+	f.drain(context.Background())
+
+	conns, _, got := p.stats()
+	if conns != 1 || got != n || q.depth() != 0 {
+		t.Errorf("%d connections, %d articles, queue depth %d; want 1, %d, 0", conns, got, q.depth(), n)
+	}
+	if c, tk := p.count("CHECK"), p.count("TAKETHIS"); c != n || tk != n {
+		t.Errorf("CHECK %d, TAKETHIS %d, want %d each", c, tk, n)
+	}
+	p.mu.Lock()
+	ahead := append([]int(nil), p.ahead...)
+	p.mu.Unlock()
+	if len(ahead) != 1 || ahead[0] != f.window-1 {
+		t.Errorf("command lines sent before the first reply: %v, want [%d]", ahead, f.window-1)
+	}
+}
+
+// bigQueue serves articles with a body of size bytes.
+type bigQueue struct {
+	*fakeQueue
+	size int
+}
+
+func (b *bigQueue) GetByMsgID(_ context.Context, msgid string) (*store.StoredArticle, error) {
+	line := strings.Repeat("x", 998) + "\r\n"
+	return &store.StoredArticle{MessageID: msgid, Headers: string(testHead(msgid)),
+		Body: strings.Repeat(line, b.size/len(line))}, nil
+}
+
+// Large articles pipelined behind CHECKs do not dead-lock the connection: the peer's
+// replies stay within the window while we write.
+func TestDrainPipelinesLargeArticles(t *testing.T) {
+	p := &feedPeer{}
+	p.start(t)
+	q := newFakeQueue(p.peer(1), 2*time.Minute)
+	b := &bigQueue{fakeQueue: q, size: 1 << 20}
+	f := newTestFeeder(q)
+	f.peers, f.arts, f.timeout = b, b, 5*time.Second
+	t.Cleanup(func() { closeFeeder(f) })
+
+	const n = 24
+	enqueue(t, q, "big", n)
+	f.drain(context.Background())
+	if conns, _, got := p.stats(); conns != 1 || got != n || q.depth() != 0 {
+		t.Errorf("%d connections, %d articles, queue depth %d; want 1, %d, 0", conns, got, q.depth(), n)
+	}
+}
 
 // A second drain within the idle time reuses the connection; after the idle timeout the
 // feeder has closed it (with QUIT) and the next drain connects again.
@@ -48,7 +120,9 @@ func TestDrainReusesConnectionUntilIdle(t *testing.T) {
 
 // CHECK and TAKETHIS replies are matched to their articles: 438 completes without
 // TAKETHIS, 431 reschedules (FailFeed), 439 completes as refused, 239 as accepted.
-func TestDrainMixedStreamingReplies(t *testing.T) {
+func TestDrainMixedStreamingReplies(t *testing.T) { forWindows(t, testDrainMixedStreamingReplies) }
+
+func testDrainMixedStreamingReplies(t *testing.T, window int) {
 	ids := []string{"<mix-0@test>", "<mix-1@test>", "<mix-2@test>", "<mix-3@test>", "<mix-4@test>", "<mix-5@test>"}
 	p := &feedPeer{
 		check: map[string]string{
@@ -61,6 +135,7 @@ func TestDrainMixedStreamingReplies(t *testing.T) {
 	p.start(t)
 	q := newFakeQueue(p.peer(1), 2*time.Minute)
 	f := newTestFeeder(q)
+	f.window = window
 	t.Cleanup(func() { closeFeeder(f) })
 	for _, id := range ids {
 		_ = q.EnqueueFeed(context.Background(), 1, id)
@@ -96,17 +171,24 @@ func TestDrainMixedStreamingReplies(t *testing.T) {
 
 // A reply that names another message-id than the command it answers means the connection
 // is out of step: the peer's items fail and the connection is dropped.
-func TestDrainReplyOutOfStep(t *testing.T) {
+func TestDrainReplyOutOfStep(t *testing.T) { forWindows(t, testDrainReplyOutOfStep) }
+
+func testDrainReplyOutOfStep(t *testing.T, window int) {
 	p := &feedPeer{check: map[string]string{"<step-1@test>": "238 <other@test>"}}
 	p.start(t)
 	q := newFakeQueue(p.peer(1), 2*time.Minute)
 	f := newTestFeeder(q)
+	f.window = window
 	t.Cleanup(func() { closeFeeder(f) })
 	ids := enqueue(t, q, "step", 3)
 	f.drain(context.Background())
 
-	if p.received(ids[0]) != 1 {
-		t.Errorf("%s not received", ids[0])
+	// In order, <step-0> was answered before the bad reply. Pipelined, its TAKETHIS reply
+	// may still be unread then, and it is rescheduled (a second offer is refused).
+	if window == 1 {
+		if p.received(ids[0]) != 1 || q.failure(ids[0]) != "" {
+			t.Errorf("%s: received %d, failure %q; want delivered", ids[0], p.received(ids[0]), q.failure(ids[0]))
+		}
 	}
 	for _, id := range ids[1:] {
 		if e := q.failure(id); !strings.Contains(e, "out of step") {
@@ -121,11 +203,14 @@ func TestDrainReplyOutOfStep(t *testing.T) {
 
 // A transport error in the middle of a batch fails the peer's remaining items (FailFeed)
 // and drops the connection; the next drain connects again.
-func TestDrainTransportErrorMidBatch(t *testing.T) {
+func TestDrainTransportErrorMidBatch(t *testing.T) { forWindows(t, testDrainTransportErrorMidBatch) }
+
+func testDrainTransportErrorMidBatch(t *testing.T, window int) {
 	p := &feedPeer{dropTake: "<mid-3@test>"}
 	p.start(t)
 	q := newFakeQueue(p.peer(1), 2*time.Minute)
 	f := newTestFeeder(q)
+	f.window = window
 	t.Cleanup(func() { closeFeeder(f) })
 	ids := enqueue(t, q, "mid", 8)
 	f.drain(context.Background())
@@ -318,10 +403,11 @@ func TestWorkerShutdownClosesConnections(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("RunWorker did not return after cancel")
 	}
-	if _, open, _ := p.stats(); open != 0 {
-		t.Errorf("%d connections open after the worker stopped, want 0", open)
-	}
-	if c := p.count("QUIT"); c != 1 {
+	waitFor(t, 3*time.Second, "no connection open after the worker stopped", func() bool {
+		_, open, _ := p.stats()
+		return open == 0
+	})
+	if c := p.count("QUIT"); c != 1 { // read by the peer before its 205, which quit awaits
 		t.Errorf("QUIT sent %d times, want 1", c)
 	}
 	// A drain after the shutdown (an Offer racing it) parks nothing.
