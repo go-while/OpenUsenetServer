@@ -127,6 +127,78 @@ func TestRegressionO05HeadKeptByteExact(t *testing.T) {
 	}
 }
 
+// O-10: stored articles had no Xref header (intake drops a peer's, and the new value went
+// only into the xref column), while OVER's Xref:full field and HDR Xref showed it, so a
+// reader or cache rebuilding the overview from the article lost it. Right (RFC 3977 8.4.1,
+// RFC 5536 3.2.14, RFC 5537 3.3): ARTICLE and HEAD, by number and by message-id, carry
+// exactly one Xref field, ours and not the peer's, with the value OVER and HDR show; a
+// cross-posted article lists every group. BODY is unchanged.
+func TestRegressionO10ServedXref(t *testing.T) {
+	knownIssue(t, "O-10", "stored articles have no Xref header")
+	e := startEnv(t)
+	e.addGroup("local.other", "y")
+	c := e.dial()
+	msgid := "<o10-xref@e2e.test>"
+	body := "body line\r\n"
+	ihaveRaw(c, msgid, strings.Join([]string{
+		"Path: e2e-peer!not-for-mail",
+		"From: E2E Tester <e2e@example.invalid>",
+		"Newsgroups: " + group + ",local.other",
+		"Subject: served xref",
+		"Xref: e2e-peer.example " + group + ":99 local.other:98",
+		"Date: " + nowDate(),
+		"Message-ID: " + msgid,
+		"", body}, "\r\n"), 235)
+
+	// xrefs returns the Xref field lines of the head in lines (an article or a head).
+	xrefs := func(lines []string) []string {
+		var out []string
+		for _, l := range lines {
+			if l == "" {
+				break
+			}
+			if name, _, ok := strings.Cut(l, ":"); ok && strings.EqualFold(name, "Xref") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+
+	c.ExpectCmd(211, "GROUP %s", group)
+	c.ExpectCmd(224, "OVER 1")
+	over := c.ReadDotLines()
+	if len(over) != 1 {
+		t.Fatalf("OVER 1: %q, want one line", over)
+	}
+	f := strings.Split(over[0], "\t")
+	want := f[len(f)-1]
+	if want != "Xref: "+pathhost+" "+group+":1 local.other:1" {
+		t.Fatalf("OVER 1: Xref field %q", want)
+	}
+	c.ExpectCmd(225, "HDR Xref 1")
+	if got := c.ReadDotLines(); len(got) != 1 || "Xref: "+strings.TrimPrefix(got[0], "1 ") != want {
+		t.Errorf("HDR Xref 1: %q, want the OVER value %q", got, want)
+	}
+	for _, sel := range []string{"1", msgid} {
+		c.ExpectCmd(220, "ARTICLE %s", sel)
+		if got := xrefs(c.ReadDotLines()); len(got) != 1 || got[0] != want {
+			t.Errorf("ARTICLE %s: Xref lines %q, want [%q] as in OVER", sel, got, want)
+		}
+		c.ExpectCmd(221, "HEAD %s", sel)
+		if got := xrefs(c.ReadDotLines()); len(got) != 1 || got[0] != want {
+			t.Errorf("HEAD %s: Xref lines %q, want [%q] as in OVER", sel, got, want)
+		}
+		if got := rawBlock(c, 222, "BODY "+sel); got != dotStuff(body) {
+			t.Errorf("BODY %s\n got %q\nwant %q", sel, got, dotStuff(body))
+		}
+	}
+	c.ExpectCmd(211, "GROUP local.other")
+	c.ExpectCmd(220, "ARTICLE 1")
+	if got := xrefs(c.ReadDotLines()); len(got) != 1 || got[0] != want {
+		t.Errorf("ARTICLE 1 in local.other: Xref lines %q, want [%q]", got, want)
+	}
+}
+
 // O-15: Parse began with normalizeNewlines, which turned every bare CR into a line break, so
 // a body line "col1\rcol2" came back as two lines (IHAVE and POST). Right: the bare CR is
 // kept as data (or the article refused, which the fix does not do).
