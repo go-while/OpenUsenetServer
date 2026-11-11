@@ -58,6 +58,9 @@ func New(cfg config.Config, st store.Store, mbox *archive.MBox, lg *log.Logger) 
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	if err := s.checkPathIdentity(ctx); err != nil {
+		return err
+	}
 	if err := controlmsg.SeedBuiltinGroups(ctx, s.st); err != nil {
 		return fmt.Errorf("seed control groups: %w", err)
 	}
@@ -362,6 +365,43 @@ func (s *Server) Addr() net.Addr {
 		return nil
 	}
 	return s.ln.Addr()
+}
+
+// checkPathIdentity refuses to start when peers are configured but the server
+// name cannot identify this site in Path (O-08): every server started from an
+// example config would claim the same identity, and a peer that sees it in Path
+// skips articles it never had. Without peers the name only shows up in local
+// articles, so the server starts and logs one warning.
+func (s *Server) checkPathIdentity(ctx context.Context) error {
+	problems := s.cfg.PathIdentityProblems()
+	if len(problems) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(problems))
+	for i, p := range problems {
+		msgs[i] = p.String()
+	}
+	detail := strings.Join(msgs, "; ")
+	enabled, err := s.st.ListEnabledPeers(ctx)
+	if err != nil {
+		return fmt.Errorf("list peers: %w", err)
+	}
+	// YAML peers count only while the peers table is empty: SeedPeers copies them then.
+	yamlPeers := 0
+	if n, err := s.st.CountPeers(ctx); err != nil {
+		return fmt.Errorf("count peers: %w", err)
+	} else if n == 0 {
+		yamlPeers = len(s.cfg.Peers)
+	}
+	if len(enabled) == 0 && yamlPeers == 0 {
+		s.log.Printf("warning: %s; fine without peers, but set it to this server's FQDN before adding any", detail)
+		return nil
+	}
+	return fmt.Errorf("refusing to start: %s.\n"+
+		"  Peers are configured (%d enabled in the database, %d to seed from peers: in the config), and\n"+
+		"  this name would go into every article fed to them. Set it to this server's fully qualified\n"+
+		"  domain name (config file, env variable, or serve --hostname), or disable the peers",
+		detail, len(enabled), yamlPeers)
 }
 
 // SeedPeers copies YAML peers into an empty peers table.
