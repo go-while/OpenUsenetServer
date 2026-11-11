@@ -42,7 +42,7 @@ earlier ones land.
 | 8 | `fix/listener-race` | `d95499d` | O-22 listener data race | +8/-4 | small |
 | 9 | `fix/import-job-race` | `6e79e9d` | O-26 archive job data race | 2 files, +61/-2 | small |
 | 10 | `fix/inbound-peer-by-hostname` | `0956037` | O-24 hostname peers bypass patterns | +67/-7 | small, Medium |
-| 10a | `fix/example-pathhost` | `0ab01b1` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 9 files, +389/-9 | small; refuses to start with peers while the name is a placeholder |
+| 10a | `fix/example-pathhost` | `0ab01b1` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 10 files, +393/-8 | small; refuses to start with peers while the name is a placeholder |
 | 11 | `fix/mode-stream-fallback` | `0527278` | O-18 MODE STREAM fallback | +206/-2 | feeder, independent of 12 |
 | 12 | `fix/feed-single-drain` | `8699c7b` | O-20, O-21 parallel drains, resends | 3 files, +605/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
 | 12a | `fix/feed-persistent-conn` | (in review) | O-17 one persistent, pipelined connection per peer | 4 files, about +1300/-160 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
