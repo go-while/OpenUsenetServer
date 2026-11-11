@@ -428,7 +428,7 @@ func (s *Session) lookup(args []string) (*store.StoredArticle, bool, error) {
 	}
 	// RFC 3977 3.2.1: a malformed argument is a syntax error (501) whether or
 	// not a group is selected, so check it before the group (412).
-	n, err := strconv.ParseInt(arg, 10, 64)
+	n, err := parseArtNum(arg)
 	if err != nil || n < 1 {
 		_ = s.conn.Reply(ErrSyntax, "syntax error")
 		return nil, false, nil
@@ -1361,24 +1361,38 @@ func parseRange(spec string) (lo, hi int64, err error) {
 	}
 	if strings.Contains(spec, "-") {
 		a, b, _ := strings.Cut(spec, "-")
-		lo, err = strconv.ParseInt(a, 10, 64)
+		lo, err = parseArtNum(a)
 		if err != nil || lo < 1 {
 			return 0, 0, fmt.Errorf("range")
 		}
 		if b == "" {
 			return lo, MaxArtNum, nil
 		}
-		hi, err = strconv.ParseInt(b, 10, 64)
+		hi, err = parseArtNum(b)
 		if err != nil {
 			return 0, 0, err
 		}
 		return lo, hi, nil
 	}
-	n, err := strconv.ParseInt(spec, 10, 64)
+	n, err := parseArtNum(spec)
 	if err != nil || n < 1 {
 		return 0, 0, fmt.Errorf("range")
 	}
 	return n, n, nil
+}
+
+// parseArtNum parses an article number as RFC 3977 writes it: 1 to 16
+// ASCII digits. strconv.ParseInt alone would also take a sign ("+1", "-2").
+func parseArtNum(s string) (int64, error) {
+	if len(s) == 0 || len(s) > 16 {
+		return 0, fmt.Errorf("article number %q", s)
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, fmt.Errorf("article number %q", s)
+		}
+	}
+	return strconv.ParseInt(s, 10, 64)
 }
 
 func itoa64(n int64) string {

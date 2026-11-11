@@ -26,6 +26,15 @@ func TestMalformedArgumentBeforeNoGroup(t *testing.T) {
 		{"HDR Subject \x02<wsprobe-1@e2e.test>", "501 "},
 		{"HDR Subject <wsprobe-1@e2e.test", "501 "},
 		{"XHDR Subject 1-x", "501 "},
+		// Article numbers are digit strings: no signs, at most 16 digits.
+		{"ARTICLE +1", "501 "},
+		{"STAT +01", "501 "},
+		{"STAT 12345678901234567", "501 "},
+		{"OVER +1", "501 "},
+		{"OVER 1--2", "501 "},
+		{"HDR Subject 1-+2", "501 "},
+		{"XOVER +1-", "501 "},
+		{"XHDR Subject +1", "501 "},
 		// Well-formed arguments still get the state and lookup codes.
 		{"ARTICLE 1", "412 "},
 		{"STAT", "412 "},
@@ -58,6 +67,8 @@ func TestMalformedArgumentInGroup(t *testing.T) {
 	}{
 		{"ARTICLE \x01<wsprobe-1@e2e.test>", "501 "},
 		{"STAT abc", "501 "},
+		{"STAT +1", "501 "},
+		{"OVER 1-+2", "501 "},
 		{"OVER <wsprobe-1@e2e.test", "501 "},
 		{"HDR Subject x", "501 "},
 		{"STAT 99", "423 "},
