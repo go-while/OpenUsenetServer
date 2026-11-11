@@ -3,7 +3,7 @@
 These tests talk to a real OpenUsenetServer listener over TCP, the way a newsreader or a
 peer does. The server runs in the test process on `127.0.0.1:0` with the in-memory store,
 so no PostgreSQL is needed (except for the one Postgres test below). They use
-[nntp-testkit](https://github.com/go-while/nntp-testkit) v0.12.0: a strict NNTP client that
+[nntp-testkit](https://github.com/go-while/nntp-testkit) v0.12.1: a strict NNTP client that
 fails on bare LF line ends, bad dot-stuffing or stray replies, the `article` builder, fake
 transit peers, and the conformance checks.
 
@@ -33,7 +33,7 @@ Without any of them the suite passes on `main`.
 | File | What it covers |
 |---|---|
 | `harness_test.go` | `startEnv` (server, store, group `local.test`, user `e2euser`), `dial`, `login`, `addUser`/`addGroup`/`addPeer`, `knownIssue`, `testArticle` (a transit article, on the kit's `article.New`), `testPost` (a newsreader's POST: no Path, no Date) |
-| `conformance_test.go` | nntp-testkit's 57 conformance checks (RFC 3977, 4642, 4643, 4644, 8054; the STARTTLS and COMPRESS ones skip, OUS offers neither); known issues: the four AUTHINFO checks of O-01 to O-04 (skipped) and the HDR 423 of O-23 in `no-current-article` (allowed with `Options.Allow`, the rest of that check still runs) |
+| `conformance_test.go` | nntp-testkit's 58 conformance checks (RFC 3977, 4642, 4643, 4644, 8054; the STARTTLS and COMPRESS ones skip, OUS offers neither); known issues: the four AUTHINFO checks of O-01 to O-04 (skipped) and the HDR 423 of O-23 in `no-current-article` (allowed with `Options.Allow`, the rest of that check still runs) |
 | `reader_test.go`, `post_test.go` | greeting and CAPABILITIES, unknown commands, GROUP/LIST/ARTICLE/STAT/OVER, pipelining, POST without From |
 | `transit_test.go` | IHAVE, CHECK/TAKETHIS, duplicates, Path loops, banned groups, denied peers, peer authentication, newgroup control, moderated groups, two servers feeding each other |
 | `regressions_test.go`, `regressions_postgres_test.go` | one test per finding (O-05, O-06, O-10, O-11, O-12, O-13, O-15, O-16, O-19, O-23), each a known issue until its fix branch is merged |

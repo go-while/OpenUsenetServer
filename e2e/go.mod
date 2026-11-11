@@ -3,7 +3,7 @@ module openusenet/e2e
 go 1.26.0
 
 require (
-	github.com/go-while/nntp-testkit v0.12.0
+	github.com/go-while/nntp-testkit v0.12.1
 	github.com/jackc/pgx/v5 v5.7.4
 	openusenet v0.0.0
 )
