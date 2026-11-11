@@ -510,6 +510,7 @@ func cmdOver(s *Session, args []string) error {
 		return s.conn.WriteBlock(OKOver, nil, "Overview information follows", []byte(line+"\r\n"))
 	}
 	lo, hi := s.cur, s.cur
+	current := true // no range: OVER is about the current article
 	if len(args) == 2 {
 		var err error
 		lo, hi, err = parseRange(args[1])
@@ -518,6 +519,8 @@ func cmdOver(s *Session, args []string) error {
 		}
 		if lo == 0 && hi == 0 {
 			lo, hi = s.cur, s.cur
+		} else {
+			current = false
 		}
 	}
 	if lo <= 0 {
@@ -528,6 +531,11 @@ func cmdOver(s *Session, args []string) error {
 		return err
 	}
 	if len(rows) == 0 {
+		if current {
+			// The current article has expired or been cancelled since it was selected
+			// (RFC 3977 8.3.2: 420 when the current article number is invalid).
+			return s.conn.Reply(FailArtnumInvalid, "current article number is invalid")
+		}
 		return s.conn.Reply(FailArtnumNotFound, "no articles in that range")
 	}
 	var body []byte
@@ -572,6 +580,11 @@ func cmdHdr(s *Session, args []string) error {
 		return err
 	}
 	if len(rows) == 0 {
+		if len(args) == 2 {
+			// No range: HDR is about the current article (RFC 3977 8.5.2), and there is
+			// none, or it has expired or been cancelled since it was selected.
+			return s.conn.Reply(FailArtnumInvalid, "current article number is invalid")
+		}
 		return s.conn.Reply(FailArtnumNotFound, "no articles in that range")
 	}
 	var body []byte
