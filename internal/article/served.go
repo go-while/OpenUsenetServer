@@ -57,3 +57,11 @@ func ServedHead(head, xref string) string {
 	}
 	return out
 }
+
+// ServedXrefDelta is the size ServedHead adds to head (negative when it
+// replaces a longer Xref field). The stores add it to the stored byte count,
+// so that :bytes in OVER and HDR is the size of the article as ARTICLE serves
+// it (RFC 3977 section 8.5.2).
+func ServedXrefDelta(head, xref string) int {
+	return len(ServedHead(head, xref)) - len(head)
+}

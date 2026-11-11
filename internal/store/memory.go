@@ -556,6 +556,7 @@ func (m *Memory) Post(_ context.Context, headers, body, msgid, subject, from, da
 	} else {
 		art.Xref = strings.Join(xrefParts, " ")
 	}
+	art.Bytes += article.ServedXrefDelta(headers, art.Xref)
 	m.arts[msgid] = art
 	m.history[msgid] = time.Now()
 	return &PostResult{MessageID: msgid, Xref: art.Xref, Numbers: nums}, nil

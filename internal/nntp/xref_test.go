@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -164,6 +165,39 @@ func TestServedXrefReplacesPeerXref(t *testing.T) {
 	a, err := st.GetByMsgID(context.Background(), msgid)
 	if err != nil || a == nil || a.Headers != stored {
 		t.Errorf("stored head changed: %v %+v", err, a)
+	}
+}
+
+// TestOverBytesCountServedXref: :bytes in OVER and HDR is the size of the
+// article as ARTICLE serves it (RFC 3977 8.5.2), so it counts our Xref line,
+// also when it replaces an Xref field kept in the stored head (an import).
+func TestOverBytesCountServedXref(t *testing.T) {
+	c, st := startTestServer(t)
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+
+	ihave(t, c, r, "<xref-bytes-1@news.test>", "Path: p!x\r\nFrom: a@b.c\r\nNewsgroups: local.test\r\n"+
+		"Subject: s\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\nMessage-ID: <xref-bytes-1@news.test>\r\n", "b\r\n")
+	head := "Path: p!x\r\nFrom: a@b.c\r\nNewsgroups: local.test\r\nXref: an.old.server.example local.test:12345\r\n" +
+		"\tlocal.other:1\r\nSubject: s\r\nDate: Mon, 01 Jan 2024 00:00:00 +0000\r\nMessage-ID: <xref-bytes-2@news.test>"
+	body := "b\r\n"
+	if _, err := st.Post(context.Background(), head, body, "<xref-bytes-2@news.test>", "s", "a@b.c",
+		"Mon, 01 Jan 2024 00:00:00 +0000", "", "news.test", len(head)+4+len(body), 1,
+		[]string{"local.test"}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _ = c.Write([]byte("GROUP local.test\r\n"))
+	_ = readLine(t, r)
+	for _, n := range []string{"1", "2"} {
+		size := strconv.Itoa(len(fetchRaw(t, c, r, "ARTICLE "+n, "220")))
+		f := strings.Split(strings.TrimSuffix(fetchRaw(t, c, r, "OVER "+n, "224"), "\r\n"), "\t")
+		if len(f) != 9 || f[6] != size {
+			t.Errorf("OVER %s: :bytes %q, want %s (ARTICLE size)", n, f[6], size)
+		}
+		if got := fetchRaw(t, c, r, "HDR :bytes "+n, "225"); got != n+" "+size+"\r\n" {
+			t.Errorf("HDR :bytes %s: %q, want %s", n, got, size)
+		}
 	}
 }
 
