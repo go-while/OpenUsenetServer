@@ -352,7 +352,7 @@ func (p *Postgres) ArticlesForGroup(ctx context.Context, group string) ([]Stored
 	for rows.Next() {
 		var a StoredArticle
 		if err := rows.Scan(&a.MessageID, &a.Subject, &a.From, &a.Date, &a.Refs,
-			&a.Bytes, &a.Lines, &a.Headers, &a.Body, &a.StoredAt, &a.Xref, &a.Num); err != nil {
+			&a.Bytes, &a.Lines, byteaString{&a.Headers}, byteaString{&a.Body}, &a.StoredAt, &a.Xref, &a.Num); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

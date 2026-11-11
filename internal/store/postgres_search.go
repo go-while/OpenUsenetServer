@@ -8,13 +8,30 @@ import (
 )
 
 func (p *Postgres) migrateSearch(ctx context.Context) error {
-	// Generated column keeps FTS in sync on insert/update (POST, IHAVE, import).
+	// articles.body is bytea and may hold any bytes. ous_utf8_text returns it
+	// as text when it is valid UTF-8 and '' otherwise (8-bit charsets, NUL,
+	// yEnc), so indexing and ts_headline never fail on an article; such
+	// articles are still found by subject and from.
 	_, err := p.pool.Exec(ctx, `
+CREATE OR REPLACE FUNCTION ous_utf8_text(b bytea) RETURNS text
+LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE AS $$
+BEGIN
+  RETURN convert_from(b, 'UTF8');
+EXCEPTION WHEN character_not_in_repertoire OR untranslatable_character THEN
+  RETURN '';
+END
+$$`)
+	if err != nil {
+		return fmt.Errorf("search text function: %w", err)
+	}
+
+	// Generated column keeps FTS in sync on insert/update (POST, IHAVE, import).
+	_, err = p.pool.Exec(ctx, `
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS search_tsv tsvector
   GENERATED ALWAYS AS (
     setweight(to_tsvector('english', coalesce(subject, '')), 'A') ||
     setweight(to_tsvector('english', coalesce(from_hdr, '')), 'B') ||
-    setweight(to_tsvector('english', coalesce(body, '')), 'C')
+    setweight(to_tsvector('english', coalesce(ous_utf8_text(body), '')), 'C')
   ) STORED`)
 	if err != nil {
 		return fmt.Errorf("search_tsv column: %w", err)
@@ -67,7 +84,7 @@ func (p *Postgres) SearchArticles(ctx context.Context, query, group string, limi
 	rows, err := p.pool.Query(ctx, `
 		SELECT a.message_id, a.subject, a.from_hdr, a.date_hdr, a.stored_at, a.xref,
 		       ts_rank_cd(a.search_tsv, q) AS rank,
-		       ts_headline('english', left(a.body, 8000), q, 'MaxWords=35, MinWords=15') AS snippet,
+		       ts_headline('english', left(ous_utf8_text(a.body), 8000), q, 'MaxWords=35, MinWords=15') AS snippet,
 		       COALESCE((
 		         SELECT g.name FROM overview o
 		         JOIN newsgroups g ON g.id = o.group_id

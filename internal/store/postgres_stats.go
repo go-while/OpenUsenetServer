@@ -150,7 +150,8 @@ func (p *Postgres) RecordContentStats(ctx context.Context, ev ContentStatsEvent)
 		}
 	}
 
-	fromKey := NormalizeFromKey(ev.From)
+	// Stats keys are TEXT; header values may hold any bytes.
+	fromKey := NormalizeFromKey(article.SanitizeUTF8(ev.From))
 	if fromKey != "" {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stats_from_day (day, from_key, n) VALUES ($1,$2,1)
@@ -160,7 +161,7 @@ func (p *Postgres) RecordContentStats(ctx context.Context, ev ContentStatsEvent)
 		}
 	}
 
-	for _, site := range PathStatSites(ev.Path, ev.ExcludeSite...) {
+	for _, site := range PathStatSites(article.SanitizeUTF8(ev.Path), ev.ExcludeSite...) {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stats_path_day (day, site, n) VALUES ($1,$2,1)
 			ON CONFLICT (day, site) DO UPDATE SET n = stats_path_day.n + 1`,
@@ -382,7 +383,7 @@ func (p *Postgres) RefreshContentStats(ctx context.Context, excludeSites []strin
 	for rows.Next() {
 		var day time.Time
 		var headers string
-		if err := rows.Scan(&day, &headers); err != nil {
+		if err := rows.Scan(&day, byteaString{&headers}); err != nil {
 			rows.Close()
 			return err
 		}
@@ -390,7 +391,7 @@ func (p *Postgres) RefreshContentStats(ctx context.Context, excludeSites []strin
 		if paths[key] == nil {
 			paths[key] = map[string]int{}
 		}
-		for _, site := range PathStatSites(pathFromHeaders(headers), excludeSites...) {
+		for _, site := range PathStatSites(article.SanitizeUTF8(pathFromHeaders(headers)), excludeSites...) {
 			paths[key][site]++
 		}
 	}

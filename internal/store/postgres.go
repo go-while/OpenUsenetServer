@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS articles (
     references_hdr TEXT NOT NULL DEFAULT '',
     bytes INT NOT NULL,
     lines INT NOT NULL,
-    headers TEXT NOT NULL,
-    body TEXT NOT NULL,
+    headers BYTEA NOT NULL,
+    body BYTEA NOT NULL,
     stored_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     xref TEXT NOT NULL DEFAULT ''
 );
@@ -117,6 +117,10 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 		pool.Close()
 		return nil, fmt.Errorf("postgres schema: %w", err)
 	}
+	if err := p.migrateArticleBytes(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	if err := p.migratePeers(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -158,6 +162,76 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// migrateArticleBytes converts articles.headers and articles.body from TEXT
+// to BYTEA. TEXT rejects NUL and invalid UTF-8, but articles are octet
+// streams (8-bit charsets, yEnc) and must be stored unchanged. Existing rows
+// are valid UTF-8, so convert_to keeps their bytes. The generated search_tsv
+// column depends on body; it is dropped here and re-created by migrateSearch.
+func (p *Postgres) migrateArticleBytes(ctx context.Context) error {
+	cols, err := articleTextColumns(ctx, p.pool)
+	if err != nil || len(cols) == 0 {
+		return err
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Another server may be running the same upgrade: look again under the
+	// table lock, so only the first one converts.
+	if _, err := tx.Exec(ctx, `LOCK TABLE articles IN ACCESS EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
+	}
+	if cols, err = articleTextColumns(ctx, tx); err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return tx.Commit(ctx)
+	}
+	// search_tsv is generated from headers and body; it is added again by
+	// migrateSearch. Both columns change in one ALTER: one table rewrite.
+	if _, err := tx.Exec(ctx, `ALTER TABLE articles DROP COLUMN IF EXISTS search_tsv`); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
+	}
+	alters := make([]string, len(cols))
+	for i, c := range cols {
+		alters[i] = fmt.Sprintf(`ALTER COLUMN %[1]s TYPE bytea USING convert_to(%[1]s, 'UTF8')`, c)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE articles `+strings.Join(alters, ", ")); err != nil {
+		return fmt.Errorf("article bytes migrate: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// articleTextColumns returns which of articles.headers and articles.body are
+// not bytea yet. The table is resolved through search_path, as every other
+// query resolves it.
+func articleTextColumns(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT attname::text FROM pg_attribute
+		WHERE attrelid = 'articles'::regclass AND attname IN ('headers', 'body')
+		  AND attnum > 0 AND NOT attisdropped AND atttypid <> 'bytea'::regtype
+		ORDER BY attnum`)
+	if err != nil {
+		return nil, fmt.Errorf("article bytes migrate: %w", err)
+	}
+	cols, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("article bytes migrate: %w", err)
+	}
+	return cols, nil
+}
+
+// byteaString scans a bytea column into a string, byte for byte.
+type byteaString struct{ dst *string }
+
+func (b byteaString) ScanBytes(v []byte) error {
+	*b.dst = string(v)
+	return nil
 }
 
 func (p *Postgres) migrateUsers(ctx context.Context) error {
@@ -452,7 +526,7 @@ func (p *Postgres) GetByNumber(ctx context.Context, group string, num int64) (*S
 		JOIN newsgroups g ON g.id=o.group_id
 		JOIN articles a ON a.id=o.article_id
 		WHERE g.name=$1 AND o.article_num=$2`, group, num).
-		Scan(&a.Num, &a.MessageID, &a.Headers, &a.Body, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
+		Scan(&a.Num, &a.MessageID, byteaString{&a.Headers}, byteaString{&a.Body}, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
 			&a.Subject, &a.From, &a.Date, &a.Refs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -469,7 +543,7 @@ func (p *Postgres) GetByMsgID(ctx context.Context, msgid string) (*StoredArticle
 		SELECT 0, a.message_id, a.headers, a.body, a.bytes, a.lines, a.stored_at, a.xref,
 		       a.subject, a.from_hdr, a.date_hdr, a.references_hdr
 		FROM articles a WHERE a.message_id=$1`, msgid).
-		Scan(&a.Num, &a.MessageID, &a.Headers, &a.Body, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
+		Scan(&a.Num, &a.MessageID, byteaString{&a.Headers}, byteaString{&a.Body}, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
 			&a.Subject, &a.From, &a.Date, &a.Refs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -683,11 +757,15 @@ func (p *Postgres) Post(ctx context.Context, headers, body, msgid, subject, from
 	// bytes is the size ARTICLE sends, with our Xref line (the caller counts the article as stored).
 	bytes = article.ServedSize(headers, body, xref)
 
+	// Article bytes go to bytea as []byte (a string would be sent as text and
+	// parsed as a bytea literal). The overview copies are TEXT, so they are
+	// made valid UTF-8 without NUL; the stored article itself is unchanged.
 	var artID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO articles (message_id, subject, from_hdr, date_hdr, references_hdr, bytes, lines, headers, body, xref, is_binary)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-		msgid, subject, from, date, refs, bytes, lines, headers, body, xref, isBinary).Scan(&artID)
+		msgid, article.SanitizeUTF8(subject), article.SanitizeUTF8(from), article.SanitizeUTF8(date),
+		article.SanitizeUTF8(refs), bytes, lines, []byte(headers), []byte(body), xref, isBinary).Scan(&artID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, ErrDuplicate
@@ -725,7 +803,7 @@ func (p *Postgres) Next(ctx context.Context, group string, cur int64) (*StoredAr
 		FROM overview o JOIN newsgroups g ON g.id=o.group_id JOIN articles a ON a.id=o.article_id
 		WHERE g.name=$1 AND o.article_num > $2
 		ORDER BY o.article_num LIMIT 1`, group, cur).
-		Scan(&a.Num, &a.MessageID, &a.Headers, &a.Body, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
+		Scan(&a.Num, &a.MessageID, byteaString{&a.Headers}, byteaString{&a.Body}, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
 			&a.Subject, &a.From, &a.Date, &a.Refs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -741,7 +819,7 @@ func (p *Postgres) Prev(ctx context.Context, group string, cur int64) (*StoredAr
 		FROM overview o JOIN newsgroups g ON g.id=o.group_id JOIN articles a ON a.id=o.article_id
 		WHERE g.name=$1 AND o.article_num < $2
 		ORDER BY o.article_num DESC LIMIT 1`, group, cur).
-		Scan(&a.Num, &a.MessageID, &a.Headers, &a.Body, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
+		Scan(&a.Num, &a.MessageID, byteaString{&a.Headers}, byteaString{&a.Body}, &a.Bytes, &a.Lines, &a.StoredAt, &a.Xref,
 			&a.Subject, &a.From, &a.Date, &a.Refs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

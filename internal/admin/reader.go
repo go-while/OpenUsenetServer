@@ -269,7 +269,7 @@ func (p *Portal) readerArticle(w http.ResponseWriter, r *http.Request, u store.U
 		"from":       article.DecodeWords(a.From),
 		"date":       a.Date,
 		"references": a.Refs,
-		"headers":    article.DecodeHeaderBlock(a.Headers),
+		"headers":    article.SanitizeUTF8(article.DecodeHeaderBlock(a.Headers)),
 		"body":       article.DecodeBodyForDisplay(a.Headers, a.Body),
 		"next":       nextNum,
 		"prev":       prevNum,
