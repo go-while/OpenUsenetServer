@@ -1133,8 +1133,11 @@ func (p *Portal) startArchiveJob(selector string) *store.ArchiveJob {
 		ID: id, Kind: "export", Status: "running", Selector: selector,
 		Dir: p.cfg.Archive.ExportDir, Started: time.Now().UTC(),
 	}
+	// The goroutine updates job under jobsMu; the caller encodes what is returned without
+	// it, so return a copy taken under the lock, not job itself.
 	p.jobsMu.Lock()
 	p.jobs[id] = job
+	snap := *job
 	p.jobsMu.Unlock()
 	go func() {
 		res, err := archive.Export(context.Background(), p.st, p.cfg.Archive.ExportDir, selector)
@@ -1153,7 +1156,7 @@ func (p *Portal) startArchiveJob(selector string) *store.ArchiveJob {
 		job.Articles = res.Articles
 		_ = archive.PruneOldExports(p.cfg.Archive.ExportDir, p.cfg.Archive.RetainGens)
 	}()
-	return job
+	return &snap
 }
 
 func (p *Portal) startImportJob(names, paths []string, workDir string, opt archive.ImportOpts) *store.ArchiveJob {
@@ -1165,8 +1168,11 @@ func (p *Portal) startImportJob(names, paths []string, workDir string, opt archi
 		Dir:      workDir,
 		Started:  time.Now().UTC(),
 	}
+	// The goroutine updates job under jobsMu; the caller encodes what is returned without
+	// it, so return a copy taken under the lock, not job itself.
 	p.jobsMu.Lock()
 	p.jobs[id] = job
+	snap := *job
 	p.jobsMu.Unlock()
 	go func() {
 		defer func() { _ = os.RemoveAll(workDir) }()
@@ -1209,7 +1215,7 @@ func (p *Portal) startImportJob(names, paths []string, workDir string, opt archi
 		job.Status = "done"
 		job.Dir = ""
 	}()
-	return job
+	return &snap
 }
 
 func pingNNTP(addr string, timeout time.Duration) (bool, string) {
