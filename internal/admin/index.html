@@ -540,6 +540,7 @@ button.ovitem .depth { color: var(--muted); }
         <button class="secondary" id="pimport">Fill fields from paste</button>
       </div>
       <p class="mono" id="pmsg"></p>
+      <p class="hidden" id="pwarn" style="color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn-line);padding:6px 8px;border-radius:4px"></p>
       <h3>Send to peer (our side)</h3>
       <div class="row">
         <select id="poursfile">
@@ -1445,11 +1446,18 @@ function applyPeerPreview(p, present) {
   if (p.notes) $("pnotes").value = p.notes;
 }
 
+// The password warning has its own line, so status messages (copy, import) don't clear it.
+function showPeerWarning(text) {
+  $("pwarn").textContent = text || "";
+  $("pwarn").classList.toggle("hidden", !text);
+}
+
 async function openPeerModal(id) {
   peerEdit = null;
   peerSnippets = {};
   peerOurSide = {};
   $("pmsg").textContent = "";
+  showPeerWarning("");
   const st = await j("/api/status");
   peerOurSide = st.our_side || {};
   if (id) {
@@ -1459,6 +1467,7 @@ async function openPeerModal(id) {
     peerSnippets = d.snippets || {};
     if (d.our_side) peerOurSide = d.our_side;
     fillPeerForm(d.peer);
+    showPeerWarning(d.password_warning);
     $("pdelete").classList.remove("hidden");
   } else {
     $("peertitle").textContent = "New peer";
@@ -1518,6 +1527,7 @@ $("psave").onclick = async () => {
     } else {
       $("pmsg").textContent = "saved";
     }
+    showPeerWarning(d.password_warning);
     $("pdelete").classList.remove("hidden");
     await loadStatus();
   } catch (e) { $("pmsg").textContent = e.message; }
