@@ -500,14 +500,11 @@ func cmdOver(s *Session, args []string) error {
 		if a == nil {
 			return s.conn.Reply(FailMsgidNotFound, "no article with that message-id")
 		}
-		line := article.OverviewLine(0, &article.Article{
-			Head: []string{
-				"Subject: " + a.Subject, "From: " + a.From, "Date: " + a.Date,
-				"Message-ID: " + a.MessageID, "References: " + a.Refs,
-			},
-			Body: a.Body,
-		}, a.Xref)
-		return s.conn.WriteBlock(OKOver, nil, "Overview information follows", []byte(line+"\r\n"))
+		line := overviewLine(store.OverviewRow{
+			Subject: a.Subject, From: a.From, Date: a.Date, MsgID: a.MessageID,
+			Refs: a.Refs, Bytes: a.Bytes, Lines: a.Lines, Xref: a.Xref,
+		})
+		return s.conn.WriteBlock(OKOver, nil, "Overview information follows", []byte(line))
 	}
 	lo, hi := s.cur, s.cur
 	current := true // no range: OVER is about the current article
@@ -540,12 +537,23 @@ func cmdOver(s *Session, args []string) error {
 	}
 	var body []byte
 	for _, r := range rows {
-		line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\tXref: %s\r\n",
-			r.Num, r.Subject, r.From, r.Date, r.MsgID, r.Refs, r.Bytes, r.Lines, r.Xref)
-		body = append(body, line...)
+		body = append(body, overviewLine(r)...)
 	}
 	return s.conn.WriteBlock(OKOver, nil, "Overview information follows", body)
 }
+
+// overviewLine formats one OVER/XOVER line from the stored overview data.
+func overviewLine(r store.OverviewRow) string {
+	return fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\tXref: %s\r\n",
+		r.Num, overviewField(r.Subject), overviewField(r.From), overviewField(r.Date),
+		overviewField(r.MsgID), overviewField(r.Refs), r.Bytes, r.Lines, r.Xref)
+}
+
+// overviewField replaces TAB, CR and LF with a space (RFC 3977 8.3.2), so a header
+// value cannot shift the overview fields.
+var overviewFieldReplacer = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
+
+func overviewField(s string) string { return overviewFieldReplacer.Replace(s) }
 
 func cmdHdr(s *Session, args []string) error {
 	header := args[1]
