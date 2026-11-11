@@ -1,9 +1,11 @@
 package feed
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"openusenet/internal/nntp"
 	"openusenet/internal/store"
@@ -14,13 +16,33 @@ import (
 // deliverArticle returns accepted=false when the peer refuses the offer (435/438)
 // without a transport error. Callers must not report that as a successful send.
 func (f *Feeder) deliverArticle(p store.Peer, msgid string, wire []byte) (accepted bool, err error) {
+	return f.deliverArticleBy(p, msgid, wire, time.Time{})
+}
+
+// deliverArticleBy is deliverArticle with a deadline for the whole delivery: the connection
+// is closed at deadline, whatever step it is in (f.timeout bounds each step). A zero deadline
+// means none.
+func (f *Feeder) deliverArticleBy(p store.Peer, msgid string, wire []byte, deadline time.Time) (accepted bool, err error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if !deadline.IsZero() {
+		cancel()
+		ctx, cancel = context.WithDeadline(context.Background(), deadline)
+	}
+	defer cancel()
+	defer func() {
+		if err != nil && ctx.Err() != nil {
+			err = fmt.Errorf("delivery cut at the claim deadline: %w", err)
+		}
+	}()
 	d := net.Dialer{Timeout: f.timeout}
-	c, err := d.Dial("tcp", p.Addr())
+	c, err := d.DialContext(ctx, "tcp", p.Addr())
 	if err != nil {
 		return false, err
 	}
 	nc := nntp.NewConn(c, f.timeout)
 	defer func() { _ = nc.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stop()
 
 	code, line, err := nc.ReadReply()
 	if err != nil {
