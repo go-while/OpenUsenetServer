@@ -45,6 +45,12 @@ type Feeder struct {
 	idleFor time.Duration // a peer's connection stays open this long after a drain (O-17)
 	running atomic.Bool   // a drain is running (one at a time, O-20)
 	pending atomic.Bool   // a drain was requested; the running one goes once more
+	active  sync.Mutex    // held by the running drain; shutdown waits for it
+
+	// base ends when RunWorker returns: every drain (also one an Offer started) stops, its
+	// connection is cut, and nothing more is reported.
+	base     context.Context
+	shutdown context.CancelFunc
 
 	connMu sync.Mutex
 	idle   map[int64]*session // parked connections by peer ID, for the next drain
@@ -60,8 +66,10 @@ func New(cfg config.Config, peers PeerSource, arts ArticleSource, lg *log.Logger
 	if lg == nil {
 		lg = log.Default()
 	}
+	base, shutdown := context.WithCancel(context.Background())
 	return &Feeder{cfg: cfg, peers: peers, arts: arts, log: lg, timeout: 15 * time.Second,
-		tick: 5 * time.Second, lease: 2 * time.Minute, window: 16, idleFor: time.Minute}
+		tick: 5 * time.Second, lease: 2 * time.Minute, window: 16, idleFor: time.Minute,
+		base: base, shutdown: shutdown}
 }
 
 // Offer enqueues the article for peers whose Path/patterns/flags allow it.
@@ -121,13 +129,14 @@ func (f *Feeder) groupStatus(ctx context.Context, groups []string) map[string]st
 	return out
 }
 
-// RunWorker drains the durable feed queue until ctx is done, then closes the connections
-// kept open for the next drain.
+// RunWorker drains the durable feed queue until ctx is done. Then it shuts the feeder
+// down: a drain still running (started by an Offer) is cancelled and awaited, the
+// connections kept open for the next drain are closed, and no drain runs any more.
 func (f *Feeder) RunWorker(ctx context.Context) {
 	if f == nil || f.arts == nil {
 		return
 	}
-	defer f.closeIdle()
+	defer f.stop()
 	t := time.NewTicker(f.tick)
 	defer t.Stop()
 	for {
@@ -148,17 +157,36 @@ func (f *Feeder) RunWorker(ctx context.Context) {
 func (f *Feeder) drain(ctx context.Context) {
 	f.pending.Store(true)
 	for f.running.CompareAndSwap(false, true) {
-		for ctx.Err() == nil && f.pending.Swap(false) {
-			f.drainOnce(ctx)
+		f.active.Lock()
+		// The drain also ends with the feeder (shutdown cancels base): its connection is
+		// cut and nothing more is reported (ous-sol's review: a drain an Offer started
+		// used to run on after RunWorker returned).
+		dctx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(f.base, cancel)
+		for dctx.Err() == nil && f.base.Err() == nil && f.pending.Swap(false) {
+			f.drainOnce(dctx)
 		}
+		ended := dctx.Err() != nil || f.base.Err() != nil
+		stop()
+		cancel()
+		f.active.Unlock()
 		f.running.Store(false)
 		// A request that came after the last Swap but before running was cleared saw a
 		// running drain and returned; pick it up here (unless another drain already did).
 		// A cancelled ctx leaves it pending for the next drain.
-		if ctx.Err() != nil || !f.pending.Load() {
+		if ended || !f.pending.Load() {
 			return
 		}
 	}
+}
+
+// stop shuts the feeder down (RunWorker's end): it cancels a running drain and waits for
+// it, then closes the parked connections. Nothing is parked or drained afterwards.
+func (f *Feeder) stop() {
+	f.shutdown()
+	f.active.Lock() // waits for the running drain to end
+	f.active.Unlock()
+	f.closeIdle()
 }
 
 func (f *Feeder) drainOnce(ctx context.Context) {
@@ -184,7 +212,7 @@ func (f *Feeder) drainOnce(ctx context.Context) {
 		byPeer[it.PeerID] = append(byPeer[it.PeerID], it)
 	}
 	for _, id := range order {
-		if time.Until(cutoff) < f.timeout {
+		if ctx.Err() != nil || time.Until(cutoff) < f.timeout {
 			break
 		}
 		f.deliverPeer(ctx, id, byPeer[id], cutoff)
@@ -232,7 +260,7 @@ func (f *Feeder) deliverPeer(ctx context.Context, peerID int64, items []store.Fe
 			queued = queued[1:]
 			return j
 		}
-		for idx < len(items) && time.Until(cutoff) >= f.timeout {
+		for idx < len(items) && ctx.Err() == nil && time.Until(cutoff) >= f.timeout {
 			it := items[idx]
 			idx++
 			wire, skip, err := f.prepare(ctx, *peer, label, it)
@@ -309,11 +337,16 @@ func (f *Feeder) deliverPeer(ctx context.Context, peerID int64, items []store.Fe
 // bounds the store call, and once cutoff has passed nothing is reported. The item is then
 // left for the next claim (a second offer is refused by the peer as a duplicate, the safe
 // side), instead of completing or rescheduling an item that another process may have
-// claimed again. err reschedules the item with a backoff; else it is done, and summary
-// (when set) becomes Stats.Last.
+// claimed again. The same goes once ctx is cancelled (the feeder shuts down). err
+// reschedules the item with a backoff; else it is done, and summary (when set) becomes
+// Stats.Last.
 func (f *Feeder) report(ctx context.Context, it store.FeedQueueItem, cutoff time.Time, accepted bool, summary string, err error) {
 	if !time.Now().Before(cutoff) {
 		f.log.Printf("feed %s peer=%d: claim deadline passed, left for the next claim (%v)", it.MessageID, it.PeerID, err)
+		return
+	}
+	if ctx.Err() != nil {
+		f.log.Printf("feed %s peer=%d: stopped (%v), left for the next claim (%v)", it.MessageID, it.PeerID, ctx.Err(), err)
 		return
 	}
 	if err != nil {

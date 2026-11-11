@@ -1,13 +1,18 @@
 package feed
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"openusenet/internal/nntp"
 	"openusenet/internal/store"
 )
 
@@ -410,14 +415,274 @@ func TestWorkerShutdownClosesConnections(t *testing.T) {
 	if c := p.count("QUIT"); c != 1 { // read by the peer before its 205, which quit awaits
 		t.Errorf("QUIT sent %d times, want 1", c)
 	}
-	// A drain after the shutdown (an Offer racing it) parks nothing.
+	// A drain after the shutdown (an Offer racing it) does nothing; the item stays queued.
 	enqueue(t, q, "late", 1)
 	f.drain(context.Background())
-	waitFor(t, 3*time.Second, "no connection open", func() bool {
-		_, open, _ := p.stats()
-		return open == 0
-	})
+	if conns, _, _ := p.stats(); conns != 1 || q.depth() != 1 {
+		t.Errorf("after shutdown: %d connections, queue depth %d; want 1, 1", conns, q.depth())
+	}
 	waitFor(t, 3*time.Second, "the goroutines back to the count before the worker", func() bool {
 		return runtime.NumGoroutine() <= base
 	})
+}
+
+// The tests below are adapted from ous-sol's review fixtures for this branch
+// (sol_review_test.go: TestSolReview*), which found the problems they cover.
+
+// scriptConn is a net.Conn that serves a scripted input, then read timeouts; writes
+// succeed (from ous-sol's solBufferedConn) unless failAt names the failing write.
+type scriptConn struct {
+	mu     sync.Mutex
+	input  *bytes.Reader
+	closed bool
+	writes int
+	failAt int // the failAt-th Write fails (0: none)
+}
+
+func newScriptConn(input string) *scriptConn {
+	return &scriptConn{input: bytes.NewReader([]byte(input))}
+}
+
+type scriptTimeout struct{}
+
+func (scriptTimeout) Error() string   { return "script read deadline" }
+func (scriptTimeout) Timeout() bool   { return true }
+func (scriptTimeout) Temporary() bool { return true }
+
+func (c *scriptConn) Read(b []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, net.ErrClosed
+	}
+	if c.input.Len() == 0 {
+		return 0, scriptTimeout{}
+	}
+	return c.input.Read(b)
+}
+
+func (c *scriptConn) Write(b []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, net.ErrClosed
+	}
+	if c.writes++; c.writes == c.failAt {
+		return 0, io.ErrClosedPipe
+	}
+	return len(b), nil
+}
+
+func (c *scriptConn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	return nil
+}
+
+func (*scriptConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (*scriptConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (*scriptConn) SetDeadline(time.Time) error      { return nil }
+func (*scriptConn) SetReadDeadline(time.Time) error  { return nil }
+func (*scriptConn) SetWriteDeadline(time.Time) error { return nil }
+
+func scriptSession(c *scriptConn) *session {
+	return &session{c: c, nc: nntp.NewConn(c, time.Second), streaming: true}
+}
+
+// A closing notice the peer sent right behind its last reply is read ahead into the
+// session's reader, not left on the socket; the parked session is not reused.
+func TestParkedSessionWithBufferedInputNotAlive(t *testing.T) {
+	c := newScriptConn("239 <accepted@test>\r\n400 closing idle connection\r\n")
+	s := scriptSession(c)
+	if code, _, err := s.nc.ReadReply(); err != nil || code != 239 {
+		t.Fatalf("first reply: code %d, err %v", code, err)
+	}
+	if s.alive() {
+		t.Fatal("parked session with a buffered 400 counted as alive")
+	}
+}
+
+// The worker's shutdown also stops a drain that an Offer started: its connection (here
+// waiting for a greeting that never comes) is cut, RunWorker returns only after the drain
+// ended, and nothing is reported: the item stays queued.
+func TestShutdownCancelsRacingDrain(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			accepted <- c
+		}
+	}()
+	p := store.Peer{ID: 1, Name: "silent", Host: "127.0.0.1", Port: ln.Addr().(*net.TCPAddr).Port, Patterns: "*", Enabled: true}
+	q := newFakeQueue(p, 2*time.Minute)
+	f := newTestFeeder(q)
+	f.timeout = 2 * time.Second
+	enqueue(t, q, "racing", 1)
+	drained := make(chan struct{})
+	go func() { f.drain(context.Background()); close(drained) }() // as Offer does
+	var peer net.Conn
+	select {
+	case peer = <-accepted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the drain did not connect")
+	}
+	defer func() { _ = peer.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { f.RunWorker(ctx); close(stopped) }()
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunWorker did not return")
+	}
+	select {
+	case <-drained:
+	default:
+		t.Error("RunWorker returned while the racing drain still ran")
+	}
+	_ = peer.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	var b [1]byte
+	if _, err := peer.Read(b[:]); err == nil {
+		t.Error("the peer read data, want the connection closed")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Error("the racing drain's connection stayed open after RunWorker returned")
+	}
+	if d, e := q.depth(), q.failure("<racing-0@test>"); d != 1 || e != "" {
+		t.Errorf("queue depth %d, failure %q; want 1 and none (nothing reported after shutdown)", d, e)
+	}
+	for _, l := range q.lateResults() {
+		t.Error(l)
+	}
+}
+
+// An idle timer whose callback runs late, after a drain took the session and parked it
+// again, leaves the new parking alone.
+func TestIdleTimerLateCallbackKeepsNewParking(t *testing.T) {
+	p := &feedPeer{}
+	p.start(t)
+	q := newFakeQueue(p.peer(1), 2*time.Minute)
+	f := newTestFeeder(q)
+	t.Cleanup(func() { closeFeeder(f) })
+	enqueue(t, q, "aba-a", 1)
+	f.drain(context.Background())
+
+	f.connMu.Lock()
+	s := f.idle[1]
+	f.connMu.Unlock()
+	if s == nil {
+		t.Fatal("no parked session after the drain")
+	}
+	gen := s.parked
+	if f.takeSession(1, f.sessionKey(q.peer)) != s {
+		t.Fatal("the parked session was not taken")
+	}
+	f.park(1, s)
+	f.expire(1, s, gen) // the first parking's timer, late
+	f.connMu.Lock()
+	still := f.idle[1] == s
+	f.connMu.Unlock()
+	if !still {
+		t.Fatal("a late timer of the earlier parking expired the new one")
+	}
+	enqueue(t, q, "aba-b", 1)
+	f.drain(context.Background())
+	if conns, _, got := p.stats(); conns != 1 || got != 2 {
+		t.Errorf("%d connections, %d articles; want 1, 2", conns, got)
+	}
+}
+
+// RFC 4644 sections 2.4.1 and 2.5.1: 238/431/438 and 239/439 name the offered message-id.
+// A reply without it cannot be matched and puts the connection out of step: no result for
+// the job, which is left for the caller to fail.
+func TestStreamingReplyRequiresID(t *testing.T) {
+	const id = "<missing-id@test>"
+	for _, tc := range []struct{ name, replies string }{
+		{"CHECK238", "238\r\n239 " + id + "\r\n"},
+		{"CHECK438", "438 already have it\r\n"},
+		{"CHECK431", "431 later\r\n"},
+		{"TAKETHIS239", "238 " + id + "\r\n239 transferred\r\n"},
+		{"TAKETHIS439", "238 " + id + "\r\n439 rejected\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := scriptSession(newScriptConn(tc.replies))
+			called := 0
+			j := &job{msgid: id, wire: testWire(id), done: func(bool, error) { called++ }}
+			left, _, err := s.stream(1, once(j))
+			if err == nil || !strings.Contains(err.Error(), "out of step") || called != 0 || len(left) != 1 || left[0] != j {
+				t.Fatalf("reply without id: err %v, done %d times, left %d; want out of step, 0, the job", err, called, len(left))
+			}
+		})
+	}
+	t.Run("CHECK500", func(t *testing.T) {
+		// 500/501 to CHECK carries no id and still means IHAVE.
+		s := scriptSession(newScriptConn("500 what?\r\n335 send it\r\n235 thanks\r\n"))
+		var accepted bool
+		j := &job{msgid: id, wire: testWire(id), done: func(a bool, _ error) { accepted = a }}
+		if left, _, err := s.stream(1, once(j)); err != nil || len(left) != 0 || !accepted || s.streaming {
+			t.Fatalf("err %v, left %d, accepted %v, streaming %v; want the IHAVE fallback", err, len(left), accepted, s.streaming)
+		}
+	})
+}
+
+// A CHECK the peer does not know (500) moves the connection to IHAVE for good: the next
+// drain on the parked connection sends no CHECK.
+func TestCheckFallbackPersistsAcrossDrains(t *testing.T) {
+	forWindows(t, func(t *testing.T, window int) {
+		p := &feedPeer{check: map[string]string{"<fallback-0@test>": "500 CHECK unsupported"}}
+		p.start(t)
+		q := newFakeQueue(p.peer(1), 2*time.Minute)
+		f := newTestFeeder(q)
+		f.window = window
+		t.Cleanup(func() { closeFeeder(f) })
+		enqueue(t, q, "fallback", 3)
+		f.drain(context.Background())
+		checks := p.count("CHECK")
+		enqueue(t, q, "fallback-later", 2)
+		f.drain(context.Background())
+		if p.count("CHECK") != checks || p.count("IHAVE") < 3 || q.depth() != 0 {
+			t.Fatalf("CHECK %d (before the second drain %d), IHAVE %d, queue depth %d; want no new CHECK, at least 3 IHAVE, 0",
+				p.count("CHECK"), checks, p.count("IHAVE"), q.depth())
+		}
+		if conns, _, got := p.stats(); conns != 1 || got != 5 {
+			t.Fatalf("%d connections, %d articles; want 1, 5", conns, got)
+		}
+	})
+}
+
+// A failed write stops sending, but a 239 that came before it still completes its job.
+func TestWriteFailureKeepsPriorAcknowledgement(t *testing.T) {
+	const a, b = "<write-a@test>", "<write-b@test>"
+	c := newScriptConn("238 " + a + "\r\n238 " + b + "\r\n239 " + a + "\r\n")
+	c.failAt = 6 // CHECK a, CHECK b, TAKETHIS a, its article, TAKETHIS b, its article
+	s := scriptSession(c)
+	var done []string
+	newJob := func(id string) *job {
+		return &job{msgid: id, wire: testWire(id), done: func(accepted bool, err error) {
+			if !accepted || err != nil {
+				t.Errorf("%s: accepted %v, err %v; want accepted", id, accepted, err)
+			}
+			done = append(done, id)
+		}}
+	}
+	ja, jb := newJob(a), newJob(b)
+	jobs := []*job{ja, jb}
+	next := func() *job {
+		if len(jobs) == 0 {
+			return nil
+		}
+		j := jobs[0]
+		jobs = jobs[1:]
+		return j
+	}
+	left, _, err := s.stream(2, next)
+	if err == nil || len(done) != 1 || done[0] != a || len(left) != 1 || left[0] != jb {
+		t.Fatalf("err %v, done %v, left %d; want an error, [%s], the job of %s", err, done, len(left), a, b)
+	}
 }

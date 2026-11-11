@@ -22,6 +22,7 @@ type session struct {
 	nc        *nntp.Conn
 	streaming bool        // CHECK/TAKETHIS, else IHAVE
 	timer     *time.Timer // closes it when it stays parked for Feeder.idleFor
+	parked    uint64      // counts its parkings; the timer expires only the parking it was set for
 }
 
 // job is one article to offer on a session. done receives the peer's answer: accepted, or
@@ -140,8 +141,8 @@ func (f *Feeder) handshake(s *session, p store.Peer) error {
 // stream offers jobs with CHECK and sends TAKETHIS for each 238, with up to window commands
 // (CHECK or TAKETHIS) outstanding. A peer answers commands in the order they came (RFC 3977
 // section 3.5), so each reply belongs to the oldest outstanding command; RFC 4644 replies
-// also carry the message-id, which must then be that command's, or the connection is out of
-// step. Keeping the outstanding commands to window also bounds the replies the peer may have
+// (238/431/438/239/439) also carry the message-id, which must be that command's, or the
+// connection is out of step. Keeping the outstanding commands to window also bounds the replies the peer may have
 // queued, so it never blocks writing them while we write an article. When a write fails
 // (the peer closed the connection while we were still sending), nothing more is sent, but
 // the replies that came before are still read and reported.
@@ -206,7 +207,7 @@ func (s *session) stream(window int, next func() *job) ([]*job, int, error) {
 		}
 		replies++
 		o := out[0]
-		if id := replyID(line); id != "" && id != o.j.msgid {
+		if id := replyID(line); (id != "" || carriesID(code)) && id != o.j.msgid {
 			return left(), replies, fmt.Errorf("reply %q to %s: out of step", line, o.command())
 		}
 		out = out[1:]
@@ -271,6 +272,19 @@ func replyID(line string) string {
 	return ""
 }
 
+// carriesID reports whether a CHECK/TAKETHIS reply with code must name the offered
+// message-id as its first argument (RFC 4644 sections 2.4.1 and 2.5.1). A reply without it
+// cannot be matched to an article, so it puts the connection out of step like a wrong one
+// (ous-sol's review). 500/501 to CHECK (not understood: IHAVE fallback) and other errors
+// such as 400 carry none.
+func carriesID(code int) bool {
+	switch code {
+	case nntp.OKCheckWant, nntp.FailCheckDefer, nntp.FailCheckRefuse, nntp.OKTakeThis, nntp.FailTakeThisReject:
+		return true
+	}
+	return false
+}
+
 // ihave offers queued and then the jobs from next with IHAVE, one after the other.
 func (s *session) ihave(next func() *job, queued []*job) ([]*job, int, error) {
 	replies := 0
@@ -331,7 +345,12 @@ func ihaveOne(nc *nntp.Conn, msgid string, wire []byte) (accepted bool, jerr err
 
 // alive reports whether a parked connection is still open: the peer has neither closed it
 // (peers time out idle feeds) nor sent anything (a 400 before closing) since the last drain.
+// Input already read ahead into the reader counts too (ous-sol's review: a 400 that came
+// with the last 239 sits there, not on the socket).
 func (s *session) alive() bool {
+	if s.nc.Buffered() > 0 {
+		return false
+	}
 	_ = s.c.SetReadDeadline(time.Now().Add(time.Millisecond))
 	var b [1]byte
 	n, err := s.c.Read(b[:])
@@ -361,7 +380,7 @@ func (f *Feeder) takeSession(id int64, key string) *session {
 	if s == nil {
 		return nil
 	}
-	s.timer.Stop() // when it already fired, expire finds s gone and leaves it alone
+	s.timer.Stop() // when it already fired, expire finds s gone (or parked anew) and leaves it alone
 	if s.key != key {
 		s.quit(f.quitWait())
 		return nil
@@ -391,7 +410,9 @@ func (f *Feeder) park(id int64, s *session) {
 	}
 	old := f.idle[id] // none: one drain at a time takes and parks
 	f.idle[id] = s
-	s.timer = time.AfterFunc(f.idleFor, func() { f.expire(id, s) })
+	s.parked++
+	gen := s.parked
+	s.timer = time.AfterFunc(f.idleFor, func() { f.expire(id, s, gen) })
 	f.connMu.Unlock()
 	if old != nil {
 		old.timer.Stop()
@@ -399,10 +420,12 @@ func (f *Feeder) park(id int64, s *session) {
 	}
 }
 
-// expire closes s when it is still parked for peer id (its idle time ran out).
-func (f *Feeder) expire(id int64, s *session) {
+// expire closes s when it is still in its gen-th parking for peer id (its idle time ran
+// out). A timer whose callback came late, while a drain took s and parked it again, must
+// not expire the new parking (ous-sol's review).
+func (f *Feeder) expire(id int64, s *session, gen uint64) {
 	f.connMu.Lock()
-	if f.idle[id] != s {
+	if f.idle[id] != s || s.parked != gen {
 		f.connMu.Unlock()
 		return
 	}
