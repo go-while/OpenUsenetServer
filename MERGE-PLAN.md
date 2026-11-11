@@ -49,7 +49,7 @@ earlier ones land.
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
-| 15a | `fix/xref-served` | `a67363d` | O-10 Xref in served articles; byte counts include it | 9 files, +775/-5 on top of 14 | **after 14**; independent of 15 and 16 (merge-tree clean); one-time PG migration of the bytes column, upgrade all servers on one database together |
+| 15a | `fix/xref-served` | `877662d` | O-10 Xref in served articles; byte counts include it | 10 files, +907/-5 on top of 14 | **after 14**; independent of 15 and 16 (merge-tree clean); one-time PG migration of the bytes column, upgrade all servers on one database together |
 | 16 | `fix/store-articles-bytea` | `f42e4fe` | O-13 8-bit articles in PostgreSQL | 9 files, +490/-17 | large, schema migration; last |
 
 Steps 2 to 13 are independent of each other: they merge onto `main` and onto each other in
