@@ -79,6 +79,7 @@ answers reader commands with 480).
 | [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | open (fix: fork branch `fix/inbound-peer-by-hostname`) |
 | [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`); decision on the snippet for peers without an outgoing password |
 | [O-26](#o-26-a-new-archive-job-is-encoded-while-it-is-being-updated) | Low | A new archive import or export job is returned and encoded as JSON while its goroutine updates it: a data race (`go test -race`) | open (fix: fork branch `fix/import-job-race`) |
+| [O-27](#o-27-a-malformed-article-argument-gets-412-not-501) | Low | ARTICLE, HEAD, BODY, STAT, OVER and HDR check the selected group before the argument, so a malformed argument without a group gets 412 instead of 501 | open (fix: fork branch `fix/syntax-before-group`) |
 
 ## Details
 
@@ -368,6 +369,17 @@ races in `TestArchiveImportAPI` on `main`, and a status reply can be torn when a
 finishes at once. The job list (`archiveJobs`) already copies under the lock. Fix: return a copy
 taken under the lock. Verified (`go test -race`, found while running the race detector on the
 integration of all fix branches).
+
+### O-27 A malformed article argument gets 412, not 501
+`lookup` (`internal/nntp/session.go:392`, used by ARTICLE, HEAD, BODY and STAT) treats anything
+not starting with `<` as an article number, but checks for a selected group before parsing it;
+`cmdOver` and `cmdHdr` do the same. Without a group, `ARTICLE <01><id>` (a control byte before
+the message-id), `STAT abc` or `OVER x-y` get `412 no newsgroup selected`. RFC 3977 section
+3.2.1 makes a malformed argument a syntax error (501) whatever the state. OVER and HDR also look
+up a message-id without the closing `>` (430) instead of answering 501. Found by nntp-testkit's
+whitespace probe (`wsprobe`, the control-byte separator cases); nntp-testkit v0.12.1's fake
+server answers 501 here. Fix: check the argument first (number, range or valid message-id), then
+the group. Verified (unit tests on `main`).
 
 ## Checked, not a bug
 

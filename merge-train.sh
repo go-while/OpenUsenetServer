@@ -16,7 +16,7 @@
 set -e
 BASE=${1:-abe8543}
 ORDER="fix/authinfo-codes fix/go-vet-self-assign fix/server-test-watchdog fix/post-auth-reply
-fix/takethis-reply-text fix/hdr-no-current-article fix/posting-account fix/listener-race
+fix/takethis-reply-text fix/hdr-no-current-article fix/syntax-before-group fix/posting-account fix/listener-race
 fix/import-job-race fix/inbound-peer-by-hostname fix/example-pathhost fix/mode-stream-fallback
 fix/feed-single-drain fix/feed-persistent-conn fix/peer-password-random fix/keep-article-bytes fix/over-msgid-bytes-on-kab fix/xref-served
 fix/store-articles-bytea"

@@ -15,7 +15,7 @@ earlier ones land.
   branch's tests into its own file. Two conflicts are left, both with keep-article-bytes and each a few lines (see below). Clashes git cannot see (two test helpers with one name; a changed function signature
   that another branch's test calls) showed up when building the integration and were fixed on
   the branches.
-- **Integration:** branch `merge-train` is `main` plus all 19 branches merged in the order below,
+- **Integration:** branch `merge-train` is `main` plus all 20 branches merged in the order below,
   without a conflict. On it: `go build`, `go vet ./...` (clean, O-14 included), `go test ./...`
   and `go test -race ./...` pass.
 - **e2e:** `merge-train` plus the fork's `e2e/` suite (nntp-testkit, 36 tests), with
@@ -38,6 +38,7 @@ earlier ones land.
 | 4 | `fix/post-auth-reply` | `32fca07` | O-19 refused POST gets two replies | +51/-2 | small, session sync bug |
 | 5 | `fix/takethis-reply-text` | `fbd1458` | O-06 239 text repeats the id | +29/-4 | small |
 | 6 | `fix/hdr-no-current-article` | `8bdee4d` | O-23 HDR/OVER 420 vs 423 | +87 | small |
+| 6a | `fix/syntax-before-group` | `d1cca61` | O-27 malformed argument 501 before 412 | 2 files, +105/-4 | small |
 | 7 | `fix/posting-account` | `87e09c3` | O-12 posting-account | 7 files, +137/-15 | small, touches posting and the web reader |
 | 8 | `fix/listener-race` | `d95499d` | O-22 listener data race | +8/-4 | small |
 | 9 | `fix/import-job-race` | `6e79e9d` | O-26 archive job data race | 2 files, +61/-2 | small |
