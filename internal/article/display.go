@@ -13,8 +13,9 @@ import (
 // DecodeBodyForDisplay decodes Content-Transfer-Encoding and the declared
 // charset for the web newsreader, independent of language. Stored articles
 // and the NNTP wire format are not changed. Multipart prefers text/plain.
+// It reads leniently: heads stored by older versions may not pass Parse.
 func DecodeBodyForDisplay(headers, body string) string {
-	art, err := Parse([]byte(strings.TrimRight(headers, "\r\n") + "\r\n\r\n" + body))
+	art, err := ParseLenient([]byte(strings.TrimRight(headers, "\r\n") + "\r\n\r\n" + body))
 	if err != nil {
 		return SanitizeUTF8(body)
 	}

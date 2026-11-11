@@ -28,11 +28,11 @@ func TestDebianBugsRCMostlyText(t *testing.T) {
 		if !strings.Contains(text, "\r\n") {
 			text = strings.ReplaceAll(text, "\n", "\r\n")
 		}
-		art, err := article.Parse([]byte(text))
+		art, err := article.ParseLenient([]byte(text))
 		if err != nil {
 			return nil
 		}
-		if binary.LooksBinary(art.RawHeaders, art.Body) {
+		if binary.LooksBinary(art.RawHeaders(), art.Body) {
 			binN++
 		}
 		return nil

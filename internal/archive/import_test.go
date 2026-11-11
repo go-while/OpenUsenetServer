@@ -89,6 +89,40 @@ duplicate id
 	}
 }
 
+// Import is lenient: a malformed head line of a historical article is dropped,
+// everything else is stored as it was, in order, with CRLF line ends.
+func TestImportKeepsHeadLines(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+	const sample = "From a@b Mon Jan 1 00:00:00 2020\n" +
+		"X-First: 1\n" +
+		"From: Alice <a@b>\n" +
+		"Subject: folded\n" +
+		"\tsubject\n" +
+		"stray line without colon\n" +
+		"Newsgroups: local.test\n" +
+		"Message-ID: <import-keep@test>\n" +
+		"Date: Mon, 1 Jan 2020 00:00:00 +0000\n" +
+		"\n" +
+		"body\n"
+	res, err := archive.Import(ctx, st, strings.NewReader(sample), archive.ImportOpts{CreateGroups: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Imported != 1 {
+		t.Fatalf("res=%+v", res)
+	}
+	art, err := st.GetByMsgID(ctx, "<import-keep@test>")
+	if err != nil || art == nil {
+		t.Fatalf("get: %v %+v", err, art)
+	}
+	want := "X-First: 1\r\nFrom: Alice <a@b>\r\nSubject: folded\r\n\tsubject\r\n" +
+		"Newsgroups: local.test\r\nMessage-ID: <import-keep@test>\r\nDate: Mon, 1 Jan 2020 00:00:00 +0000"
+	if art.Headers != want {
+		t.Fatalf("stored head\n%q\nwant\n%q", art.Headers, want)
+	}
+}
+
 func TestGroupFromMBoxPath(t *testing.T) {
 	if g := archive.GroupFromMBoxPath("/tmp/alt.fan.usenet.mbox"); g != "alt.fan.usenet" {
 		t.Fatal(g)

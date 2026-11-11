@@ -118,7 +118,7 @@ func Accept(ctx context.Context, cfg config.Config, st store.Store, mbox *archiv
 		}
 		return &Outcome{Mailed: mailed}, nil
 	}
-	isBin := binary.LooksBinary(art.RawHeaders, art.Body)
+	isBin := binary.LooksBinary(art.RawHeaders(), art.Body)
 	if isBin && userID > 0 {
 		limit := cfg.Retention.UserBinaryPostsPerDay
 		if limit > 0 {

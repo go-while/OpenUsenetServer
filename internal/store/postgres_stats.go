@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"openusenet/internal/article"
 )
 
 func (p *Postgres) migrateContentStats(ctx context.Context) error {
@@ -412,14 +414,10 @@ func (p *Postgres) RefreshContentStats(ctx context.Context, excludeSites []strin
 	return tx.Commit(ctx)
 }
 
+// pathFromHeaders returns the Path of a stored head, unfolded: a Path folded
+// over several lines must count every site, as at intake.
 func pathFromHeaders(headers string) string {
-	for _, line := range strings.Split(headers, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if len(line) >= 5 && strings.EqualFold(line[:5], "Path:") {
-			return strings.TrimSpace(line[5:])
-		}
-	}
-	return ""
+	return article.HeaderValue(headers, "Path")
 }
 
 func (p *Postgres) topGroupsDay(ctx context.Context, day time.Time, limit int) ([]NameCount, error) {

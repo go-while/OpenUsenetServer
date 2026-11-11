@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"openusenet/internal/article"
 	"openusenet/internal/mail"
 	wmat "openusenet/internal/wildmat"
 )
@@ -444,18 +445,8 @@ func headerValue(header string, a *memArt) string {
 	case "xref":
 		return a.Xref
 	default:
-		return headerFromRaw(a.Headers, header)
+		return article.HeaderValue(a.Headers, header)
 	}
-}
-
-func headerFromRaw(raw, name string) string {
-	for _, line := range strings.Split(raw, "\r\n") {
-		k, v, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(k, name) {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func itoa(n int) string {
