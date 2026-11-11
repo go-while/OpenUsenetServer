@@ -885,19 +885,19 @@ func (s *Session) matchInboundPeer(ctx context.Context) *store.Peer {
 		}
 	}
 	remote := s.conn.Remote()
+	// The same match as admission (IP, CIDR, or a hostname resolved forward), so a peer
+	// configured by hostname gets its patterns applied too.
+	if p := peerauth.MatchPeer(peers, remote); p != nil {
+		return p
+	}
 	host, _, _ := net.SplitHostPort(remote)
 	if host == "" {
 		host = remote
 	}
 	for i := range peers {
 		p := &peers[i]
-		if !p.Enabled {
-			continue
-		}
-		for _, h := range []string{p.IncomingHost, p.Host, p.Name} {
-			if h != "" && strings.EqualFold(h, host) {
-				return p
-			}
+		if p.Enabled && p.Name != "" && strings.EqualFold(p.Name, host) {
+			return p
 		}
 	}
 	return nil
