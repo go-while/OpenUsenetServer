@@ -40,7 +40,7 @@ func TestAcceptMailsModeratedAndSkipsStore(t *testing.T) {
 	ctx := context.Background()
 	in := Input{From: "Poster <poster@example.org>", Newsgroups: "local.test,misc.test.moderated", Subject: "please", Body: "hello\n"}
 	offers := &offerLog{}
-	_, err := Accept(ctx, cfg, st, nil, offers, nil, in, 0)
+	_, err := Accept(ctx, cfg, st, nil, offers, nil, in, 0, "")
 	if err == nil || !strings.Contains(err.Error(), "mail server is not configured") {
 		t.Fatalf("unconfigured %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAcceptMailsModeratedAndSkipsStore(t *testing.T) {
 	})
 	t.Cleanup(restore)
 
-	out, err := Accept(ctx, cfg, st, nil, offers, nil, in, 0)
+	out, err := Accept(ctx, cfg, st, nil, offers, nil, in, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestAcceptMailsModeratedAndSkipsStore(t *testing.T) {
 	restoreFail := moderate.SetDeliver(func(context.Context, mail.Settings, []string, []byte) error {
 		return errors.New("smtp down")
 	})
-	_, err = Accept(ctx, cfg, st, nil, offers, nil, in, 0)
+	_, err = Accept(ctx, cfg, st, nil, offers, nil, in, 0, "")
 	restoreFail()
 	if err == nil || !strings.Contains(err.Error(), "smtp down") {
 		t.Fatalf("mail failure %v", err)
@@ -107,7 +107,7 @@ func TestAcceptMailsModeratedAndSkipsStore(t *testing.T) {
 	})
 	out, err = Accept(ctx, cfg, st, nil, offers, nil, Input{
 		From: "poster@example.org", Newsgroups: "local.announce", Subject: "local", Body: "x\n",
-	}, 0)
+	}, 0, "")
 	restore()
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestAcceptStoresUnmoderated(t *testing.T) {
 	offers := &offerLog{}
 	out, err := Accept(context.Background(), cfg, st, nil, offers, nil, Input{
 		From: "poster@example.org", Newsgroups: "local.test", Subject: "plain", Body: "body\n",
-	}, 0)
+	}, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,5 +140,23 @@ func TestAcceptStoresUnmoderated(t *testing.T) {
 	}
 	if out.Stored.Numbers["local.test"] == 0 {
 		t.Fatalf("numbers %+v", out.Stored.Numbers)
+	}
+}
+
+func TestAcceptSetsPostingAccount(t *testing.T) {
+	st, cfg := moderatedFixture(t)
+	ctx := context.Background()
+	out, err := Accept(ctx, cfg, st, nil, &offerLog{}, nil, Input{
+		From: "alice@example.org", Newsgroups: "local.test", Subject: "mine", Body: "body\n",
+	}, 1, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa, err := st.GetByMsgID(ctx, out.Stored.MessageID)
+	if err != nil || sa == nil {
+		t.Fatalf("stored %v %v", sa, err)
+	}
+	if want := `Injection-Info: news.test; posting-account="alice"`; !strings.Contains(sa.Headers, want) {
+		t.Fatalf("headers lack %q:\n%s", want, sa.Headers)
 	}
 }

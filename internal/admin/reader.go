@@ -327,7 +327,7 @@ func (p *Portal) readerPost(w http.ResponseWriter, r *http.Request, u store.User
 	if strings.TrimSpace(in.From) == "" {
 		in.From = readerFrom(u, p.cfg.Server.Hostname)
 	}
-	res, err := posting.Accept(r.Context(), p.cfg, p.st, p.mbox, p.feeder, p.log, in, u.ID)
+	res, err := posting.Accept(r.Context(), p.cfg, p.st, p.mbox, p.feeder, p.log, in, u.ID, u.Username)
 	if err != nil {
 		if errors.Is(err, store.ErrNoGroup) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "newsgroup does not exist"})

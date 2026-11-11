@@ -48,8 +48,9 @@ type Mailed struct {
 
 // Accept validates and injects a local post. An unapproved article for a
 // moderated group is mailed and not stored. Anything else is stored, appended
-// to the mbox, and offered to peers.
-func Accept(ctx context.Context, cfg config.Config, st store.Store, mbox *archive.MBox, feeder Feeder, lg *log.Logger, in Input, userID int64) (*Outcome, error) {
+// to the mbox, and offered to peers. account is the poster's user name for
+// Injection-Info; empty omits it.
+func Accept(ctx context.Context, cfg config.Config, st store.Store, mbox *archive.MBox, feeder Feeder, lg *log.Logger, in Input, userID int64, account string) (*Outcome, error) {
 	if lg == nil {
 		lg = log.Default()
 	}
@@ -91,9 +92,10 @@ func Accept(ctx context.Context, cfg config.Config, st store.Store, mbox *archiv
 		return nil, err
 	}
 	if err := article.InjectForPost(art, article.InjectOpts{
-		Pathhost:     cfg.Server.Pathhost,
-		Hostname:     cfg.Server.Hostname,
-		Organization: cfg.Server.Organization,
+		Pathhost:       cfg.Server.Pathhost,
+		Hostname:       cfg.Server.Hostname,
+		Organization:   cfg.Server.Organization,
+		PostingAccount: account,
 	}); err != nil {
 		return nil, err
 	}

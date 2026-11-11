@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"openusenet/internal/article"
+	"openusenet/internal/auth"
 	"openusenet/internal/config"
 	"openusenet/internal/mail"
 	"openusenet/internal/moderate"
@@ -186,6 +187,45 @@ func TestGroupListPostArticle(t *testing.T) {
 	}
 	if strings.Contains(olines[0], "Xref:full") || !strings.Contains(olines[0], "\tXref: news.test local.test:1") {
 		t.Fatalf("xref overview field: %q", olines[0])
+	}
+}
+
+func TestPostCarriesPostingAccount(t *testing.T) {
+	c, st := startTestServer(t)
+	hash, err := auth.HashPassword("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateUser(context.Background(), store.User{Username: "nc-interop", PasswordHash: hash, CanPost: true}); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(c)
+	_ = readLine(t, r)
+	_, _ = c.Write([]byte("AUTHINFO USER nc-interop\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "381 ") {
+		t.Fatalf("authinfo user %q", l)
+	}
+	_, _ = c.Write([]byte("AUTHINFO PASS secret\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "281 ") {
+		t.Fatalf("authinfo pass %q", l)
+	}
+	_, _ = c.Write([]byte("POST\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "340 ") {
+		t.Fatalf("post cont %q", l)
+	}
+	_, _ = c.Write([]byte("From: tester@example.com\r\nNewsgroups: local.test\r\nSubject: hello\r\n\r\nbody\r\n.\r\n"))
+	if l := readLine(t, r); !strings.HasPrefix(l, "240 ") {
+		t.Fatalf("posted %q", l)
+	}
+	_, _ = c.Write([]byte("GROUP local.test\r\nHEAD 1\r\n"))
+	_ = readLine(t, r)
+	first, lines := readBlock(t, r)
+	if !strings.HasPrefix(first, "221 ") {
+		t.Fatalf("head %q", first)
+	}
+	want := `Injection-Info: news.test; posting-account="nc-interop"`
+	if blob := strings.Join(lines, "\n"); !strings.Contains(blob, want) {
+		t.Fatalf("headers lack %q:\n%s", want, blob)
 	}
 }
 
