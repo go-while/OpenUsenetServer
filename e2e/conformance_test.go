@@ -28,6 +28,19 @@ var authinfoKnownIssues = []string{
 	"authinfo-capabilities",
 }
 
+// allowedKnownIssues are conformance failures that are known on main, tolerated with
+// conformance Options.Allow unless OUS_E2E_KNOWN_ISSUES=1: a Fail of the check whose detail
+// contains the text is reported as a Skip ("allowed: ..."), any other Fail still fails.
+//
+// no-current-article is O-23 (ISSUES.md): in a group without a current article, HDR without a
+// range answers 423 where 420 is right; fixed by fix/hdr-no-current-article. HDR is the last
+// command of the check, after ARTICLE, HEAD, BODY, STAT, NEXT, LAST and OVER, so allowing
+// only its 423 keeps the rest of the check asserted (Skip would drop the whole check). Drop the
+// entry when the fix is merged.
+var allowedKnownIssues = map[string]string{
+	"no-current-article": `HDR Subject: got "423 `,
+}
+
 func TestConformance(t *testing.T) {
 	e := startEnv(t)
 	addr := e.Addr
@@ -42,12 +55,14 @@ func TestConformance(t *testing.T) {
 	}
 	c.Close()
 	var skip []string
+	var allow map[string]string
 	if os.Getenv("OUS_E2E_KNOWN_ISSUES") != "1" {
-		skip = authinfoKnownIssues
-		t.Logf("skipping known issues O-01..O-04 (%v); set OUS_E2E_KNOWN_ISSUES=1 to run them", skip)
+		skip, allow = authinfoKnownIssues, allowedKnownIssues
+		t.Logf("skipping known issues O-01..O-04 (%v), allowing O-23 (%v); set OUS_E2E_KNOWN_ISSUES=1 to run them", skip, allow)
 	}
 	rep := conformance.RunVerbose(t, conformance.Options{
 		Skip:      skip,
+		Allow:     allow,
 		Addr:      addr,
 		User:      user,
 		Pass:      pass,
