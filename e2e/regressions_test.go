@@ -94,8 +94,10 @@ func TestRegressionO19RefusedPostOneReply(t *testing.T) {
 
 // O-05: Parse kept the head in a map and Wire() rebuilt it (known fields first, the rest in map
 // order, folded lines joined), and that rebuilt head was stored and served. Right (RFC 5537
-// 3.2/3.3): the head comes back as received, except our hop prepended to Path: order, case of
-// field names, folding, missing space after the colon and unknown X- fields kept.
+// 3.2/3.3): the head comes back as received, except our hop prepended to Path and our Xref
+// field (O-10) appended at the end: order, case of field names, folding, missing space after
+// the colon and unknown X- fields kept. Xref is allowed here, not required (the O-10 test
+// requires it), so this test does not depend on the order the two fixes are merged in.
 func TestRegressionO05HeadKeptByteExact(t *testing.T) {
 	knownIssue(t, "O-05", "the article head is rebuilt from a map")
 	e := startEnv(t)
@@ -118,8 +120,10 @@ func TestRegressionO05HeadKeptByteExact(t *testing.T) {
 	ihaveRaw(c, msgid, head+"\r\n"+body, 235)
 
 	wantHead := strings.Replace(head, "Path: e2e-peer!", "Path: "+pathhost+"!e2e-peer!", 1)
-	if got, want := rawBlock(c, 220, "ARTICLE "+msgid), dotStuff(wantHead+"\r\n"+body); got != want {
-		t.Fatalf("ARTICLE %s\n got %q\nwant %q", msgid, got, want)
+	withXref := wantHead + "Xref: " + pathhost + " " + group + ":1\r\n"
+	got := rawBlock(c, 220, "ARTICLE "+msgid)
+	if got != dotStuff(wantHead+"\r\n"+body) && got != dotStuff(withXref+"\r\n"+body) {
+		t.Fatalf("ARTICLE %s\n got %q\nwant %q", msgid, got, dotStuff(withXref+"\r\n"+body))
 	}
 }
 
