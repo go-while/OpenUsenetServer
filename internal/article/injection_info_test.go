@@ -24,12 +24,22 @@ func TestInjectForPostRefusesInjectionInfo(t *testing.T) {
 		"Injection-Info: other.example\r\n",
 		`Injection-Info: news.example; posting-account="alice"` + "\r\n",
 		"injection-info: other.example\r\n",
-		"Injection-Info:\r\n",
 	} {
 		_, err := injectPost(t, injHeaders+h, "bob")
 		if err == nil || !strings.Contains(err.Error(), "Injection-Info") {
 			t.Errorf("header %q: err %v, want refusal naming Injection-Info", h, err)
 		}
+	}
+	// An empty Injection-Info forges nothing: it is replaced by the server's.
+	a, err := injectPost(t, injHeaders+"Injection-Info:\r\n", "bob")
+	if err != nil {
+		t.Fatalf("empty Injection-Info: %v", err)
+	}
+	if got := a.Get("Injection-Info"); !strings.Contains(got, `posting-account="bob"`) {
+		t.Fatalf("empty Injection-Info not replaced: %q", got)
+	}
+	if n := strings.Count(strings.ToLower(string(a.Wire())), "\r\ninjection-info:"); n != 1 {
+		t.Fatalf("%d Injection-Info lines in %q", n, a.Wire())
 	}
 }
 

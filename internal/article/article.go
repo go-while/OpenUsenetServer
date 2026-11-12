@@ -196,10 +196,9 @@ func InjectForPost(a *Article, opt InjectOpts) error {
 	}
 	// Injection-Info belongs to the injecting server (RFC 5536 3.2.8); like
 	// INN, refuse a local post that brings its own. Transit keeps it.
-	for name := range a.Headers {
-		if strings.EqualFold(name, "Injection-Info") {
-			return ErrInjectionInfo
-		}
+	// An empty one forges nothing and is replaced below.
+	if a.Has("Injection-Info") {
+		return ErrInjectionInfo
 	}
 	if strings.TrimSpace(a.Get("From")) == "" {
 		return fmt.Errorf("missing From")
