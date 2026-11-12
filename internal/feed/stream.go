@@ -149,13 +149,14 @@ func (f *Feeder) handshake(s *session, p store.Peer) error {
 func (s *session) stream(window int, next func() *job) ([]*job, int, error) {
 	window = max(window, 1)
 	var (
-		out     []offer // outstanding, oldest first
-		want    []*job  // answered 238, TAKETHIS not yet sent
-		nocheck []*job  // CHECK not understood (500/501): offered with IHAVE afterwards
-		unsent  *job    // its command could not be written
-		werr    error   // that write's error
-		replies int
-		more    = true
+		out      []offer // outstanding, oldest first
+		want     []*job  // answered 238, TAKETHIS not yet sent
+		nocheck  []*job  // CHECK refused as a command (500/501): offered with IHAVE once out is empty
+		nostream bool    // a 500 came: the peer does not know CHECK, IHAVE for the rest of the session
+		unsent   *job    // its command could not be written
+		werr     error   // that write's error
+		replies  int
+		more     = true
 	)
 	left := func() []*job {
 		l := make([]*job, 0, len(out)+len(want)+len(nocheck)+1)
@@ -196,6 +197,24 @@ func (s *session) stream(window int, next func() *job) ([]*job, int, error) {
 			if werr != nil {
 				return left(), replies, werr
 			}
+			if len(nocheck) > 0 {
+				// Nothing is outstanding any more, so IHAVE may use the connection.
+				batch := nocheck
+				nocheck = nil
+				l, n, err := s.ihave(func() *job { return nil }, batch)
+				replies += n
+				if err != nil {
+					return l, replies, err
+				}
+				if nostream {
+					// The peer advertised streaming but does not know CHECK (500): IHAVE
+					// from here on, for the rest of this connection's life.
+					s.streaming = false
+					l, n, err := s.ihave(next, nil)
+					return l, replies + n, err
+				}
+				continue
+			}
 			break
 		}
 		code, line, err := s.nc.ReadReply()
@@ -233,20 +252,22 @@ func (s *session) stream(window int, next func() *job) ([]*job, int, error) {
 			o.j.done(false, nil)
 		case nntp.FailCheckDefer:
 			o.j.done(false, fmt.Errorf("peer deferred CHECK: %s", line))
-		case nntp.ErrCommand, nntp.ErrSyntax:
+		case nntp.ErrCommand:
+			// 500: the command is not recognised, so CHECK is useless on this connection.
+			nostream = true
+			nocheck = append(nocheck, o.j)
+		case nntp.ErrSyntax:
+			// 501: a complaint about this one command line (RFC 3977 section 3.2.1), most
+			// likely this message-id. It says nothing about the others, so streaming
+			// stays; this article goes out with IHAVE, which a peer that lacks CHECK
+			// answers fine and a peer that dislikes the id refuses again (that answer is
+			// reported as the item's error, as for any IHAVE).
 			nocheck = append(nocheck, o.j)
 		default:
 			o.j.done(false, fmt.Errorf("CHECK %s", line))
 		}
 	}
-	if len(nocheck) == 0 {
-		return nil, replies, nil
-	}
-	// The peer advertised streaming but does not know CHECK: IHAVE from here on, for the
-	// rest of this connection's life.
-	s.streaming = false
-	l, n, err := s.ihave(next, nocheck)
-	return l, replies + n, err
+	return nil, replies, nil
 }
 
 func (o offer) command() string {

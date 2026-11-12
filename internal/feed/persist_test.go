@@ -620,18 +620,47 @@ func TestStreamingReplyRequiresID(t *testing.T) {
 			}
 		})
 	}
-	// 500/501 to CHECK carries no id and still means IHAVE, whatever its text says, even
-	// text that starts with "<" (ous-sol's review).
-	for _, reply := range []string{"500 what?", "500 <CHECK> unsupported command", "501 <argument> not understood"} {
-		t.Run(reply, func(t *testing.T) {
-			s := scriptSession(newScriptConn(reply + "\r\n335 send it\r\n235 thanks\r\n"))
+	// 500/501 to CHECK carries no id and still gets this article offered with IHAVE,
+	// whatever its text says, even text that starts with "<" (ous-sol's review). Only 500
+	// (command not recognised) moves the session to IHAVE; 501 is about this one command.
+	for _, tc := range []struct {
+		reply     string
+		streaming bool
+	}{{"500 what?", false}, {"500 <CHECK> unsupported command", false}, {"501 <argument> not understood", true}} {
+		t.Run(tc.reply, func(t *testing.T) {
+			s := scriptSession(newScriptConn(tc.reply + "\r\n335 send it\r\n235 thanks\r\n"))
 			var accepted bool
 			j := &job{msgid: id, wire: testWire(id), done: func(a bool, _ error) { accepted = a }}
-			if left, _, err := s.stream(1, once(j)); err != nil || len(left) != 0 || !accepted || s.streaming {
-				t.Fatalf("err %v, left %d, accepted %v, streaming %v; want the IHAVE fallback", err, len(left), accepted, s.streaming)
+			if left, _, err := s.stream(1, once(j)); err != nil || len(left) != 0 || !accepted || s.streaming != tc.streaming {
+				t.Fatalf("err %v, left %d, accepted %v, streaming %v; want the IHAVE fallback, streaming %v", err, len(left), accepted, s.streaming, tc.streaming)
 			}
 		})
 	}
+}
+
+// A 501 to one CHECK is a complaint about that command (a message-id the peer dislikes), not
+// about CHECK: that article goes out with IHAVE and the others stay on CHECK/TAKETHIS, in
+// this drain and on the parked connection in the next.
+func TestCheck501OnlyThatArticleUsesIHAVE(t *testing.T) {
+	forWindows(t, func(t *testing.T, window int) {
+		p := &feedPeer{check: map[string]string{"<syn-2@test>": "501 bad message-id"}}
+		p.start(t)
+		q := newFakeQueue(p.peer(1), 2*time.Minute)
+		f := newTestFeeder(q)
+		f.window = window
+		t.Cleanup(func() { closeFeeder(f) })
+		enqueue(t, q, "syn", 6)
+		f.drain(context.Background())
+		enqueue(t, q, "syn-later", 3)
+		f.drain(context.Background())
+		if p.count("CHECK") != 9 || p.count("TAKETHIS") != 8 || p.count("IHAVE") != 1 || q.depth() != 0 {
+			t.Fatalf("CHECK %d, TAKETHIS %d, IHAVE %d, queue depth %d; want 9, 8, 1, 0",
+				p.count("CHECK"), p.count("TAKETHIS"), p.count("IHAVE"), q.depth())
+		}
+		if conns, _, got := p.stats(); conns != 1 || got != 9 {
+			t.Fatalf("%d connections, %d articles; want 1, 9", conns, got)
+		}
+	})
 }
 
 // A CHECK the peer does not know (500) moves the connection to IHAVE for good: the next
