@@ -659,7 +659,14 @@ func splitEq(s string) (string, string, bool) {
 func applyHostnameFlag(cfg *config.Config, hostname string) {
 	old := cfg.Server.Hostname
 	cfg.Server.Hostname = hostname
-	if cfg.Server.Pathhost == "" || cfg.Server.Pathhost == old {
+	if cfg.Server.Pathhost == "" || sameHostname(cfg.Server.Pathhost, old) {
 		cfg.Server.Pathhost = hostname
 	}
+}
+
+// sameHostname compares names as config.PathIdentityProblems does: ignoring case, surrounding
+// space and a trailing dot.
+func sameHostname(a, b string) bool {
+	norm := func(s string) string { return strings.TrimSuffix(strings.TrimSpace(s), ".") }
+	return strings.EqualFold(norm(a), norm(b))
 }

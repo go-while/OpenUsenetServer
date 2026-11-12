@@ -26,6 +26,8 @@ services:
     environment:
       # Placeholder: set OPENUSENET_HOSTNAME in .env to this server's FQDN before adding peers.
       OPENUSENET_HOSTNAME: ${OPENUSENET_HOSTNAME:-news.example.org}
+      # Optional separate Path identity; empty means the same as OPENUSENET_HOSTNAME.
+      OPENUSENET_PATHHOST: ${OPENUSENET_PATHHOST:-}
       OPENUSENET_ORGANIZATION: ${OPENUSENET_ORGANIZATION:-OpenUsenetServer}
       OPENUSENET_LISTEN: ${OPENUSENET_LISTEN:-:119}
       OPENUSENET_HTTP: ${OPENUSENET_HTTP:-:8080}

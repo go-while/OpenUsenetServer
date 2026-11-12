@@ -23,3 +23,26 @@ func TestApplyHostnameFlag(t *testing.T) {
 		}
 	}
 }
+
+// config.PathIdentityProblems compares the two names case-insensitively, so --hostname must too:
+// with hostname News.Example.org and pathhost news.example.org the pathhost only followed the
+// hostname, and it has to follow the flag (a trailing dot is the same name).
+func TestApplyHostnameFlagCaseInsensitive(t *testing.T) {
+	for _, tc := range []struct{ host, path string }{
+		{"News.Example.org", "news.example.org"},
+		{"news.example.org", "NEWS.EXAMPLE.ORG"},
+		{"news.example.org.", "news.example.org"},
+		{"news.example.org", "news.example.org."},
+	} {
+		cfg := config.Config{Server: config.Server{Hostname: tc.host, Pathhost: tc.path}}
+		applyHostnameFlag(&cfg, "news.real-site.org")
+		if cfg.Server.Pathhost != "news.real-site.org" {
+			t.Errorf("host %q path %q: pathhost %q did not follow --hostname", tc.host, tc.path, cfg.Server.Pathhost)
+		}
+	}
+	cfg := config.Config{Server: config.Server{Hostname: "news.example.org", Pathhost: "path.example.org"}}
+	applyHostnameFlag(&cfg, "news.real-site.org")
+	if cfg.Server.Pathhost != "path.example.org" {
+		t.Errorf("a different pathhost must stay, got %q", cfg.Server.Pathhost)
+	}
+}

@@ -42,7 +42,7 @@ func New(cfg config.Config, st store.Store, mbox *archive.MBox, lg *log.Logger) 
 		lg = log.Default()
 	}
 	ctl := ops.New()
-	s := &Server{cfg: cfg, st: st, mbox: mbox, log: lg, feeder: feed.New(cfg, st, st, lg), ops: ctl}
+	s := &Server{cfg: cfg, st: st, mbox: mbox, log: lg, feeder: feed.New(cfg, st, feed.RequirePathIdentity(cfg, st, lg), lg), ops: ctl}
 	if !cfg.Watchdog.IsEnabled() {
 		ctl.SetWatchdogEnabled(false)
 	}

@@ -79,7 +79,7 @@ printf 'CAPABILITIES\r\nQUIT\r\n' | timeout 3 nc 127.0.0.1 119
 # admin (public): https://$ADMIN_DOMAIN/   # Caddy + Let's Encrypt; see docs/tls.md
 ```
 
-`OPENUSENET_HOSTNAME` (or `server.hostname` in `config.yml`) is this server's Path identity and Message-ID domain; peers use it for loop detection, so it must be the server's own FQDN. The shipped value `news.example.org` is a placeholder: with it (or `localhost`, `*.local`, `*.invalid`, other example names, or an IP address) `openusenet serve` refuses to start while any peer is configured, and only logs a warning when there are none. `OPENUSENET_PATHHOST` / `server.pathhost` sets a different Path identity.
+`OPENUSENET_HOSTNAME` (or `server.hostname` in `config.yml`) is this server's Path identity and Message-ID domain; peers use it for loop detection, so it must be the server's own FQDN. The shipped value `news.example.org` is a placeholder: with it (or `localhost`, `*.local`, `*.invalid`, other example names, or an IP address) `openusenet serve` refuses to start while any peer is configured, and only logs a warning when there are none. The admin portal then refuses to create or enable peers, and the feeder sends nothing, until the name is fixed. `OPENUSENET_PATHHOST` / `server.pathhost` sets a different Path identity (empty means the same as the hostname; `docker-compose.yml` passes it through).
 
 Compose uses `jsevans/openusenet:0.8.0` by default (`OPENUSENET_IMAGE` overrides the tag).
 

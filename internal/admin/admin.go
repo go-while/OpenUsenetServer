@@ -790,6 +790,9 @@ func (p *Portal) peers(w http.ResponseWriter, r *http.Request, _ store.User) {
 			return
 		}
 		in.ID = 0
+		if in.Enabled && p.refuseEnablePeerWithBadIdentity(w) {
+			return
+		}
 		peerauth.PreparePeer(p.cfg.Server.Pathhost, &in)
 		created, err := p.st.CreatePeer(r.Context(), in)
 		if err != nil {
@@ -801,6 +804,9 @@ func (p *Portal) peers(w http.ResponseWriter, r *http.Request, _ store.User) {
 		var in store.Peer
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if in.Enabled && p.refuseEnablePeerWithBadIdentity(w) {
 			return
 		}
 		peerauth.PreparePeer(p.cfg.Server.Pathhost, &in)
@@ -993,6 +999,9 @@ func (p *Portal) peersImportINN(w http.ResponseWriter, r *http.Request, _ store.
 			return
 		}
 	} else {
+		if preview.Enabled && p.refuseEnablePeerWithBadIdentity(w) {
+			return
+		}
 		created, err := p.st.CreatePeer(r.Context(), preview)
 		if err != nil {
 			writeErr(w, err)
