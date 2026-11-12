@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -185,10 +186,20 @@ type InjectOpts struct {
 	PostingAccount string
 }
 
+// ErrInjectionInfo is returned for a local post that carries Injection-Info.
+var ErrInjectionInfo = errors.New("Can't set system Injection-Info header field")
+
 // InjectForPost validates and fills RFC 5536 injection headers.
 func InjectForPost(a *Article, opt InjectOpts) error {
 	if opt.Now.IsZero() {
 		opt.Now = time.Now().UTC()
+	}
+	// Injection-Info belongs to the injecting server (RFC 5536 3.2.8); like
+	// INN, refuse a local post that brings its own. Transit keeps it.
+	for name := range a.Headers {
+		if strings.EqualFold(name, "Injection-Info") {
+			return ErrInjectionInfo
+		}
 	}
 	if strings.TrimSpace(a.Get("From")) == "" {
 		return fmt.Errorf("missing From")
@@ -228,32 +239,37 @@ func InjectForPost(a *Article, opt InjectOpts) error {
 		// compact YYYYMMDDHHMMSSZ form, then remembers the message-id.
 		a.Set("Injection-Date", opt.Now.UTC().Format(time.RFC1123Z))
 	}
-	if !a.Has("Injection-Info") {
-		info := opt.Hostname
-		if acct := quoteParam(opt.PostingAccount); acct != "" {
-			info += "; posting-account=" + acct
-		}
-		a.Set("Injection-Info", info)
+	info := opt.Hostname
+	if acct := quoteParam(opt.PostingAccount); acct != "" {
+		info += "; posting-account=" + acct
 	}
+	a.Set("Injection-Info", info)
 	stripXref(a)
 	return nil
 }
 
-// quoteParam returns v as an RFC 5322 quoted-string, or "" when v is empty.
-// Control characters are dropped; '"' and '\' are escaped.
+// maxAccountLen caps the posting-account value. User names are short; a
+// longer one is not truncated (that would name a different account) but left
+// out, so the header line stays far below the 998 octet limit.
+const maxAccountLen = 64
+
+// quoteParam returns v as an RFC 5322 quoted-string, or "" when v is empty,
+// longer than maxAccountLen octets, or not printable ASCII (the header must
+// not carry raw UTF-8 or control characters). '"' and '\' are escaped.
 func quoteParam(v string) string {
+	if v == "" || len(v) > maxAccountLen {
+		return ""
+	}
 	var b strings.Builder
-	for _, r := range v {
-		switch {
-		case r < 0x20 || r == 0x7f:
-			continue
-		case r == '"' || r == '\\':
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c < 0x20 || c > 0x7e {
+			return ""
+		}
+		if c == '"' || c == '\\' {
 			b.WriteByte('\\')
 		}
-		b.WriteRune(r)
-	}
-	if b.Len() == 0 {
-		return ""
+		b.WriteByte(c)
 	}
 	return `"` + b.String() + `"`
 }
