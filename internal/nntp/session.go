@@ -712,11 +712,12 @@ func (s *Session) requireFeedAuth(ctx context.Context) error {
 	return nil
 }
 
+// filterArticle returns errReplied (or a write error) after sending a reject; nil means pass.
 func (s *Session) filterArticle(raw []byte, rejectCode int, msgid string) error {
 	r := cleanfeed.Check(s.cfg.Cleanfeed, raw)
 	if r.Reject {
 		s.rememberReject(msgid)
-		return s.conn.Reply(rejectCode, r.Reason)
+		return replied(s.conn.Reply(rejectCode, r.Reason))
 	}
 	if r.Audit && s.log != nil {
 		s.log.Printf("cleanfeed audit: %s", r.Reason)
@@ -733,6 +734,7 @@ func (s *Session) rememberReject(msgid string) {
 	}
 }
 
+// refuseAccept returns errReplied (or a write error) after sending a refusal; nil means accept.
 func (s *Session) refuseAccept(post bool) error {
 	if s.ops == nil {
 		return nil
@@ -745,17 +747,18 @@ func (s *Session) refuseAccept(post bool) error {
 		reason = "server paused"
 	}
 	if post {
-		return s.conn.Reply(FailPostReject, reason)
+		return replied(s.conn.Reply(FailPostReject, reason))
 	}
-	return s.conn.Reply(FailIHaveDefer, reason)
+	return replied(s.conn.Reply(FailIHaveDefer, reason))
 }
 
+// checkCutoff returns errReplied (or a write error) after sending a reject; nil means pass.
 func (s *Session) checkCutoff(art *article.Article, rejectCode int) error {
 	if !article.TooOld(art.Get("Date"), s.cfg.Limits.ArtCutoffDays, time.Time{}) {
 		return nil
 	}
 	s.rememberReject(art.Get("Message-ID"))
-	return s.conn.Reply(rejectCode, "article too old")
+	return replied(s.conn.Reply(rejectCode, "article too old"))
 }
 
 // submitModerated mails a local unapproved post and does not store it.
