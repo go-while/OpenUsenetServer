@@ -164,7 +164,11 @@ func (f *Feeder) drain(ctx context.Context) {
 		dctx, cancel := context.WithCancel(ctx)
 		stop := context.AfterFunc(f.base, cancel)
 		for dctx.Err() == nil && f.base.Err() == nil && f.pending.Swap(false) {
-			f.drainOnce(dctx)
+			if f.drainOnce(dctx) {
+				// The batch was full, so more may be due: go on without waiting for the
+				// next Offer or worker tick (a burst of Offers collapses into pending).
+				f.pending.Store(true)
+			}
 		}
 		ended := dctx.Err() != nil || f.base.Err() != nil
 		stop()
@@ -189,14 +193,19 @@ func (f *Feeder) stop() {
 	f.closeIdle()
 }
 
-func (f *Feeder) drainOnce(ctx context.Context) {
+// feedBatch is the number of items one claim takes.
+const feedBatch = 32
+
+// drainOnce claims and delivers one batch. It reports whether the batch was full and every
+// peer's items were handled, i.e. whether another claim may find more due items.
+func (f *Feeder) drainOnce(ctx context.Context) (more bool) {
 	// The store leases claimed items for f.lease from its own clock; taking the time
 	// before the claim keeps this estimate at or before the store's lease end.
 	claimed := time.Now()
-	items, err := f.arts.ClaimFeedDue(ctx, 32)
+	items, err := f.arts.ClaimFeedDue(ctx, feedBatch)
 	if err != nil {
 		f.log.Printf("feed claim: %v", err)
-		return
+		return false
 	}
 	// No item may still be in delivery when its lease runs out, or a drain elsewhere
 	// (another process on the same queue) could claim and send it again (O-21). Each
@@ -213,10 +222,11 @@ func (f *Feeder) drainOnce(ctx context.Context) {
 	}
 	for _, id := range order {
 		if ctx.Err() != nil || time.Until(cutoff) < f.timeout {
-			break
+			return false
 		}
 		f.deliverPeer(ctx, id, byPeer[id], cutoff)
 	}
+	return len(items) == feedBatch && ctx.Err() == nil
 }
 
 // deliverPeer delivers the claimed items of one peer over one connection (O-17): the one

@@ -330,6 +330,34 @@ func TestOfferBurstOneConnectionAtATime(t *testing.T) {
 	}
 }
 
+// A burst larger than one claim batch (32) must drain completely from the Offer kicks alone,
+// without waiting for worker ticks (there is no worker here): the Offers collapse into one
+// pending request, and a full batch has to trigger the next claim.
+func TestOfferBurstLargerThanBatch(t *testing.T) {
+	p := startPeer(t, 0, false)
+	q := newFakeQueue(p.storePeer(), 2*time.Minute)
+	f := newTestFeeder(q)
+
+	const n = 100
+	for i := range n {
+		id := fmt.Sprintf("<bigburst-%d@test>", i)
+		f.Offer(id, "origin.example!not-for-mail", []string{"test.group"}, testWire(id))
+	}
+	waitFor(t, 10*time.Second, "every article at the peer and an empty queue", func() bool {
+		_, _, _, got := p.snapshot()
+		return got == n && q.depth() == 0
+	})
+	maxOpen, _, offers, _ := p.snapshot()
+	if maxOpen > 1 {
+		t.Errorf("maxOpen = %d, want at most 1 connection at a time", maxOpen)
+	}
+	for id, c := range offers {
+		if c != 1 {
+			t.Errorf("%s offered %d times, want 1", id, c)
+		}
+	}
+}
+
 // O-21: a batch slower than the claim lease must not be claimed again while it runs, and
 // no item may be finished after its lease ran out. 20 queued items at about 40 ms each take
 // longer than the 600 ms lease; the worker ticks every 20 ms, and new articles keep arriving
