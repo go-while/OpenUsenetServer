@@ -256,6 +256,11 @@ func cmdListgroup(s *Session, args []string) error {
 		}
 		name = s.group.Name
 	}
+	// Syntax before state: a malformed range is 501 and must not select the group.
+	lo, hi, err := parseRange(rangeSpec)
+	if err != nil {
+		return s.conn.Reply(ErrSyntax, "syntax error")
+	}
 	g, err := s.store.GetGroup(context.Background(), name)
 	if err != nil {
 		return err
@@ -265,13 +270,12 @@ func cmdListgroup(s *Session, args []string) error {
 	}
 	s.group = g
 	s.cur = firstNum(g)
-	lo, hi, err := parseRange(rangeSpec)
-	if err != nil {
-		return s.conn.Reply(ErrSyntax, "syntax error")
-	}
-	nums, err := s.store.ArticleNumbers(context.Background(), name, lo, hi)
-	if err != nil {
-		return err
+	var nums []int64
+	if !emptyRange(lo, hi) {
+		nums, err = s.store.ArticleNumbers(context.Background(), name, lo, hi)
+		if err != nil {
+			return err
+		}
 	}
 	var body []byte
 	for _, n := range nums {
@@ -520,6 +524,9 @@ func cmdOver(s *Session, args []string) error {
 			lo, hi = s.cur, s.cur
 		}
 	}
+	if emptyRange(lo, hi) {
+		return s.conn.Reply(FailArtnumNotFound, "no articles in that range")
+	}
 	if lo <= 0 {
 		return s.conn.Reply(FailArtnumInvalid, "current article number is invalid")
 	}
@@ -569,6 +576,9 @@ func cmdHdr(s *Session, args []string) error {
 	}
 	if s.group == nil {
 		return s.conn.Reply(FailNoGroup, "no newsgroup selected")
+	}
+	if emptyRange(lo, hi) {
+		return s.conn.Reply(FailArtnumNotFound, "no articles in that range")
 	}
 	rows, err := s.store.Header(context.Background(), s.group.Name, lo, hi, header)
 	if err != nil {
@@ -1355,6 +1365,10 @@ func rangeOrMsgID(arg string) bool {
 	return err == nil
 }
 
+// parseRange parses an article range: "" (no range, returned as 0, 0), "N", "N-" (hi is
+// MaxArtNum) or "N-M". lo is at least 1 for every real range. M may be below N (including
+// 0): the range is then empty, see emptyRange. Callers must not pass such a hi to the
+// store, which reads 0 as "no upper bound".
 func parseRange(spec string) (lo, hi int64, err error) {
 	if spec == "" {
 		return 0, 0, nil
@@ -1379,6 +1393,12 @@ func parseRange(spec string) (lo, hi int64, err error) {
 		return 0, 0, fmt.Errorf("range")
 	}
 	return n, n, nil
+}
+
+// emptyRange reports whether a parsed range holds no articles because hi is below lo.
+// The "no range" result of parseRange (0, 0) is not empty.
+func emptyRange(lo, hi int64) bool {
+	return hi < lo
 }
 
 // parseArtNum parses an article number as RFC 3977 writes it: 1 to 16
