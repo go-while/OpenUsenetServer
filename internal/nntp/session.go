@@ -560,6 +560,11 @@ func cmdHdr(s *Session, args []string) error {
 		return s.conn.WriteBlock(OKHdr, nil, "headers follow", []byte(line))
 	}
 	lo, hi := s.cur, s.cur
+	if len(args) == 2 && lo <= 0 {
+		// No range and no valid current article. The store reads 0 as "unbounded", so
+		// Header(0, 0) would list the whole group.
+		return s.conn.Reply(FailArtnumInvalid, "current article number is invalid")
+	}
 	if len(args) == 3 {
 		var err error
 		lo, hi, err = parseRange(args[2])
