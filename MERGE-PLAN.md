@@ -35,23 +35,23 @@ earlier ones land.
 | 1 | `fix/authinfo-codes` (PR #4) | `ac01a95` | O-01..O-04 AUTHINFO codes | 3 files, +148/-9 | open already |
 | 2 | `fix/go-vet-self-assign` | `6f7bd46` | O-14 `go vet` | 1 line | makes `go vet ./...` clean for every later PR |
 | 3 | `fix/server-test-watchdog` | `7dd085c` | test: load watchdog off in TestPOSTFeedsIHAVE | +6 | stops the 441 flake on busy CI |
-| 4 | `fix/post-auth-reply` | `32fca07` | O-19 refused POST gets two replies | +51/-2 | small, session sync bug |
+| 4 | `fix/post-auth-reply` | `d9ca8fc` | O-19 refused POST gets two replies | 3 files, +201/-6 | small, session sync bug |
 | 5 | `fix/takethis-reply-text` | `fbd1458` | O-06 239 text repeats the id | +29/-4 | small |
-| 6 | `fix/hdr-no-current-article` | `8bdee4d` | O-23 HDR/OVER 420 vs 423 | +87 | small |
-| 6a | `fix/syntax-before-group` | `762edf2` | O-27 malformed argument 501 before 412 | 2 files, +134/-8 | small |
-| 7 | `fix/posting-account` | `87e09c3` | O-12 posting-account | 7 files, +137/-15 | small, touches posting and the web reader |
+| 6 | `fix/hdr-no-current-article` | `736eed2` | O-23 HDR/OVER 420 vs 423 | 2 files, +117 | small |
+| 6a | `fix/syntax-before-group` | `bb8cadf` | O-27 malformed argument 501 before 412 | 2 files, +235/-15 | small |
+| 7 | `fix/posting-account` | `0fe8300` | O-12 posting-account | 10 files, +323/-16 | small, touches posting and the web reader |
 | 8 | `fix/listener-race` | `d95499d` | O-22 listener data race | +8/-4 | small |
 | 9 | `fix/import-job-race` | `6e79e9d` | O-26 archive job data race | 2 files, +61/-2 | small |
 | 10 | `fix/inbound-peer-by-hostname` | `0956037` | O-24 hostname peers bypass patterns | +67/-7 | small, Medium |
-| 10a | `fix/example-pathhost` | `0ab01b1` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 10 files, +393/-8 | small; refuses to start with peers while the name is a placeholder |
+| 10a | `fix/example-pathhost` | `3eb082f` | O-08 placeholder path identity; `--hostname` moves a defaulted pathhost | 15 files, +710/-9 | small; refuses to start with peers, to enable a peer in the portal, and to feed, while the name is a placeholder |
 | 11 | `fix/mode-stream-fallback` | `0527278` | O-18 MODE STREAM fallback | +206/-2 | feeder, independent of 12 |
-| 12 | `fix/feed-single-drain` | `8699c7b` | O-20, O-21 parallel drains, resends | 3 files, +605/-23 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
-| 12a | `fix/feed-persistent-conn` | `e9c3ce1` | O-17 one persistent, pipelined connection per peer | 5 files, +1606/-160 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
+| 12 | `fix/feed-single-drain` | `f6c6d65` | O-20, O-21 parallel drains, resends | 3 files, +646/-26 | feeder; keeps `deliverArticle`'s signature so 11 and 12 merge in either order |
+| 12a | `fix/feed-persistent-conn` | `cd35608` | O-17 one persistent, pipelined connection per peer | 6 files, +1857/-157 on top of 11 and 12 | **after 11 and 12** (it is built on both) |
 | 13 | `fix/peer-password-random` | `b85a95e` | O-25 computable peer password | 5 files, +209/-8 | one open question for the maintainer (ISSUES.md O-25) |
 | 14 | `fix/keep-article-bytes` | `2ad717c` | O-05, O-15, O-16 article bytes kept | 16 files, +894/-157 | large; the core change |
 | 15 | `fix/over-msgid-bytes-on-kab` | `1ff8529` | O-11 OVER by message-id | +67/-11 on top of 14 | **after 14**; resolves the one real conflict (see below) |
 | 15a | `fix/xref-served` | `877662d` | O-10 Xref in served articles; byte counts include it | 10 files, +907/-5 on top of 14 | **after 14**; independent of 15 and 16 (merge-tree clean); one-time PG migration of the bytes column, upgrade all servers on one database together |
-| 16 | `fix/store-articles-bytea` | `f42e4fe` | O-13 8-bit articles in PostgreSQL | 9 files, +490/-17 | large, schema migration; last |
+| 16 | `fix/store-articles-bytea` | `aeeddf7` | O-13 8-bit articles in PostgreSQL | 10 files, +502/-17 | large, schema migration; last |
 
 Steps 2 to 13 are independent of each other: they merge onto `main` and onto each other in
 any order without a conflict (checked pairwise), and all of them together build and pass. The order above is only small and safe
