@@ -285,7 +285,10 @@ sends `340 send article to be posted`. The client got its 480 and goes on with, 
 `AUTHINFO USER`, but the server now reads that as article text until a lone dot, so the session
 hangs or goes out of sync. The IHAVE path already avoids this with `replied()`. Verified (found
 by the agent writing the O-01 to O-04 fix, whose test hung on it; reproduced with a unit test
-that times out without the fix).
+that times out without the fix). Seen again on 2026-11-12 by pynntp's integration tests against
+`main` abe8543: every POST before login got `480 Authentication required for POST\r\n340 send
+article to be posted\r\n` in one packet, and the following `AUTHINFO USER` went unanswered
+(5 of 5 connections).
 
 ### O-20 Parallel feed connections without a limit
 `Offer` (`internal/feed/feed.go:93`) starts `go f.drainOnce(...)` for every accepted article, in
