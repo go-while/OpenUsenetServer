@@ -101,6 +101,13 @@ docker compose up -d
 - Once any user exists, **POST** requires `AUTHINFO USER` / `AUTHINFO PASS` with `can_post` or `admin`.
 - Admin portal requires login. First admin: setup page, `openusenet user add --admin ...`, or `OPENUSENET_BOOTSTRAP_ADMIN=user:pass`.
 
+## Upgrading
+
+Some versions convert the PostgreSQL schema on their first start (for example article
+text to `bytea`). Stop every server that uses the same database, upgrade them all, then
+start them again: an older server on a converted database fails to read articles and can
+store them changed.
+
 ## Layout
 
 | Path | Role |

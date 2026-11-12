@@ -165,6 +165,11 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 // streams (8-bit charsets, yEnc) and must be stored unchanged. Existing rows
 // are valid UTF-8, so convert_to keeps their bytes. The generated search_tsv
 // column depends on body; it is dropped here and re-created by migrateSearch.
+//
+// Upgrade all servers that share a database together. After the conversion a
+// server still running older code cannot read articles (it scans BYTEA into a
+// string and fails), and its posts are sent as text and parsed as bytea
+// escapes: a backslash sequence in an article is stored changed or refused.
 func (p *Postgres) migrateArticleBytes(ctx context.Context) error {
 	cols, err := articleTextColumns(ctx, p.pool)
 	if err != nil || len(cols) == 0 {
