@@ -29,7 +29,7 @@ findings are still live: **O-08** (upstream only *warns* on a placeholder pathho
 also refuses to peer) and **O-25** (upstream still auto-fills the computable peer password). The
 fork fix branches for the fixed findings have been pruned; `fix/example-pathhost` (O-08) and
 `fix/peer-password-random` (O-25) remain. Separately, the release Docker image still builds on Go
-1.25 (GO-2026-6859); a toolchain bump is pending.
+1.25 (GO-2026-6859); a toolchain bump is filed upstream as PR #7.
 
 ## Test runs so far
 
@@ -88,7 +88,7 @@ answers reader commands with 480).
 | [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | fixed upstream (PR #5) |
 | [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | fixed upstream (PR #5) |
 | [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | fixed upstream (PR #5) |
-| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (decision); upstream `FillPasswords` still auto-fills the computable PairPassword; fork `fix/peer-password-random` |
+| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (decision); upstream `FillPasswords` still auto-fills the computable PairPassword; raised upstream as issue #8; fork `fix/peer-password-random` |
 | [O-26](#o-26-a-new-archive-job-is-encoded-while-it-is-being-updated) | Low | A new archive import or export job is returned and encoded as JSON while its goroutine updates it: a data race (`go test -race`) | fixed upstream (PR #5) |
 | [O-27](#o-27-a-malformed-article-argument-gets-412-not-501) | Low | ARTICLE, HEAD, BODY, STAT, OVER and HDR check the selected group before the argument, so a malformed argument without a group gets 412 instead of 501 | fixed upstream (PR #5) |
 
