@@ -20,6 +20,17 @@ The planned merge order of the fix branches is in [MERGE-PLAN.md](MERGE-PLAN.md)
 Status values: **open**, **PR** (fix waiting for review, with its number), **fixed** (with
 the PR that fixed it), **decision** (needs the maintainer to decide), **won't fix**.
 
+**Re-baseline 2026-11-25 against upstream `main` at `0ae4bbc`.** Upstream now carries PR #4
+(O-01..O-04) and Jason's own **PR #5** (`1e599c4`, "Fix NNTP conformance, article preservation,
+bytea storage, feeder, and races"), which fixed O-05, O-06, O-10..O-24 (less O-08) and O-26..O-27
+his own way, each pinned by a test in `internal/nntp/conformance_test.go` or `internal/feed/stream_test.go`.
+O-07 is marked not-a-bug and O-09 was resolved on the fork (`e2e/` is its own module). Only two
+findings are still live: **O-08** (upstream only *warns* on a placeholder pathhost; the fork branch
+also refuses to peer) and **O-25** (upstream still auto-fills the computable peer password). The
+fork fix branches for the fixed findings have been pruned; `fix/example-pathhost` (O-08) and
+`fix/peer-password-random` (O-25) remain. Separately, the release Docker image still builds on Go
+1.25 (GO-2026-6859); a toolchain bump is pending.
+
 ## Test runs so far
 
 | Run | Tool | Result |
@@ -53,33 +64,33 @@ answers reader commands with 480).
 
 | ID | Severity | Summary | Status |
 |---|---|---|---|
-| [O-01](#o-01-wrong-password-gets-480-not-481) | Medium | A wrong AUTHINFO password gets 480 instead of 481 | PR (#4) |
-| [O-02](#o-02-authinfo-pass-before-user-gets-501-not-482) | Low | AUTHINFO PASS before USER gets 501 instead of 482 | PR (#4) |
-| [O-03](#o-03-authinfo-after-a-login-is-accepted-and-drops-the-login) | Low | AUTHINFO after a successful login is accepted (381) instead of 502, and logs the session out | PR (#4) |
-| [O-04](#o-04-capabilities-still-lists-authinfo-after-a-login) | Low | CAPABILITIES still lists `AUTHINFO USER` after a login | PR (#4) |
-| [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | open (fix: fork branch `fix/keep-article-bytes`) |
-| [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | open (fix: fork branch `fix/takethis-reply-text`) |
+| [O-01](#o-01-wrong-password-gets-480-not-481) | Medium | A wrong AUTHINFO password gets 480 instead of 481 | fixed (#4, merged) |
+| [O-02](#o-02-authinfo-pass-before-user-gets-501-not-482) | Low | AUTHINFO PASS before USER gets 501 instead of 482 | fixed (#4, merged) |
+| [O-03](#o-03-authinfo-after-a-login-is-accepted-and-drops-the-login) | Low | AUTHINFO after a successful login is accepted (381) instead of 502, and logs the session out | fixed (#4, merged) |
+| [O-04](#o-04-capabilities-still-lists-authinfo-after-a-login) | Low | CAPABILITIES still lists `AUTHINFO USER` after a login | fixed (#4, merged) |
+| [O-05](#o-05-the-article-head-is-rebuilt-not-kept) | Medium | The article head is rebuilt, not kept: header order changes, unknown headers come out in random order, folding is lost | fixed upstream (PR #5) |
+| [O-06](#o-06-235-and-239-reply-text-repeats-the-message-id) | Low | 239 (and 235) reply text repeats the message-id | fixed upstream (PR #5) |
 | [O-07](#o-07-build-fails-on-debian-and-with-docker-or-podman) | Low | Build fails on Debian, Docker and Podman builds fail on package conflicts | not a bug (Debian's Go defaults to `GOTOOLCHAIN=local`; see details) |
-| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | open (fix: fork branch `fix/example-pathhost`: placeholder in the examples, refuses to peer with a placeholder name) |
+| [O-08](#o-08-the-example-path-host-reaches-peers) | Low | Running with the example config prepends `news.localhost!` to Path | open; upstream warns on placeholder (PR #5); fork `fix/example-pathhost` additionally refuses to peer |
 | [O-09](#o-09-test-dependency-raises-the-go-version) | Low | The e2e test dependency raises `go.mod` to Go 1.26 | fixed on the fork (`e2e/` is its own module) |
-| [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | open (fix: fork branch `fix/xref-served`, on keep-article-bytes: Xref set when ARTICLE/HEAD serve, stored articles and the feed unchanged) |
-| [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | open (fix: fork branch `fix/over-msgid-bytes`) |
-| [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | open (fix: fork branch `fix/posting-account`) |
-| [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | open (fix: fork branch `fix/store-articles-bytea`; verified on PostgreSQL 16 incl. migration of a live test DB) |
-| [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | open (fix: fork branch `fix/go-vet-self-assign`) |
-| [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | open (fix: fork branch `fix/keep-article-bytes`) |
-| [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | open (fix: fork branch `fix/keep-article-bytes`) |
-| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | open (fix: fork branch `fix/feed-persistent-conn`) |
-| [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | open (fix: fork branch `fix/mode-stream-fallback`) |
-| [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | open (fix: fork branch `fix/post-auth-reply`) |
-| [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | open (fix: fork branch `fix/feed-single-drain`) |
-| [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | open (fix: fork branch `fix/feed-single-drain`) |
-| [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | open (fix: fork branch `fix/listener-race`) |
-| [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | open (fix: fork branch `fix/hdr-no-current-article`) |
-| [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | open (fix: fork branch `fix/inbound-peer-by-hostname`) |
-| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (fix: fork branch `fix/peer-password-random`); decision on the snippet for peers without an outgoing password |
-| [O-26](#o-26-a-new-archive-job-is-encoded-while-it-is-being-updated) | Low | A new archive import or export job is returned and encoded as JSON while its goroutine updates it: a data race (`go test -race`) | open (fix: fork branch `fix/import-job-race`) |
-| [O-27](#o-27-a-malformed-article-argument-gets-412-not-501) | Low | ARTICLE, HEAD, BODY, STAT, OVER and HDR check the selected group before the argument, so a malformed argument without a group gets 412 instead of 501 | open (fix: fork branch `fix/syntax-before-group`) |
+| [O-10](#o-10-stored-articles-have-no-xref-header) | Medium | Stored articles have no Xref header, but OVER's `Xref:full` field has one | fixed upstream (PR #5) |
+| [O-11](#o-11-over-by-message-id-reports-the-wrong-bytes) | Low | OVER by message-id reports the wrong `:bytes` | fixed upstream (PR #5) |
+| [O-12](#o-12-injection-info-always-says-posting-accountopenusenet) | Low | Injection-Info always says `posting-account="openusenet"`, not the logged-in user | fixed upstream (PR #5) |
+| [O-13](#o-13-8-bit-articles-cannot-be-stored-and-get-436-forever) | High | Articles with non-UTF-8 bytes or NUL (Latin-1 text, yEnc) cannot be stored; IHAVE answers 436, so peers retry forever | fixed upstream (PR #5) |
+| [O-14](#o-14-go-vet-fails-on-main) | Low | `go vet ./...` fails on `main`: self-assignment in `internal/mail/settings.go` | fixed upstream (PR #5) |
+| [O-15](#o-15-a-bare-cr-or-lf-becomes-a-line-break) | Medium | A bare CR (or LF) inside an article becomes a line break: `col1\rcol2` is stored as two lines | fixed upstream (PR #5) |
+| [O-16](#o-16-a-header-line-without-a-colon-is-mangled-not-refused) | Low | A header line without a colon is split at its first colon and stored with a space added, instead of refused | fixed upstream (PR #5; malformed header now 437) |
+| [O-17](#o-17-the-feeder-opens-one-connection-per-article) | Medium | The outgoing feeder opens one connection per article, and sends CHECK/TAKETHIS one at a time | fixed upstream (PR #5) |
+| [O-18](#o-18-no-streaming-to-a-peer-without-capabilities) | Low | A peer that does not answer CAPABILITIES (Diablo) gets IHAVE; MODE STREAM is never tried | fixed upstream (PR #5) |
+| [O-19](#o-19-a-refused-post-gets-two-replies) | Medium | A refused POST gets 480 or 440 and then also 340; the server reads the next commands as article text | fixed upstream (PR #5) |
+| [O-20](#o-20-parallel-feed-connections-without-a-limit) | Medium | Every accepted article starts its own feed run, so connections to one peer run in parallel without a limit | fixed upstream (PR #5) |
+| [O-21](#o-21-a-slow-peer-gets-articles-twice) | Low | A batch slower than the 2-minute claim is claimed again, and the peer is offered the same articles twice | fixed upstream (PR #5) |
+| [O-22](#o-22-the-listener-is-published-without-synchronisation) | Low | `ListenAndServe` stores its listener without synchronisation and `Addr()` reads it: a data race (`go test -race`) | fixed upstream (PR #5) |
+| [O-23](#o-23-hdr-and-over-without-a-range-answer-423-not-420) | Low | HDR and OVER without a range answer 423 instead of 420 when there is no valid current article | fixed upstream (PR #5) |
+| [O-24](#o-24-a-peer-configured-by-hostname-can-feed-any-group) | Medium | A peer configured by hostname is admitted, but its group patterns are not applied, so it can feed any group | fixed upstream (PR #5) |
+| [O-25](#o-25-the-suggested-peer-password-can-be-computed-by-anyone) | Low | The admin portal suggests a peer password derived from the two path hostnames, which anyone can compute | open (decision); upstream `FillPasswords` still auto-fills the computable PairPassword; fork `fix/peer-password-random` |
+| [O-26](#o-26-a-new-archive-job-is-encoded-while-it-is-being-updated) | Low | A new archive import or export job is returned and encoded as JSON while its goroutine updates it: a data race (`go test -race`) | fixed upstream (PR #5) |
+| [O-27](#o-27-a-malformed-article-argument-gets-412-not-501) | Low | ARTICLE, HEAD, BODY, STAT, OVER and HDR check the selected group before the argument, so a malformed argument without a group gets 412 instead of 501 | fixed upstream (PR #5) |
 
 ## Details
 

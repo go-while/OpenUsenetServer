@@ -1,5 +1,14 @@
 # Merge plan for the fork's fixes
 
+> **Superseded 2026-11-25 (re-baseline against upstream `main` `0ae4bbc`).** PRs #2, #3, #4 are
+> merged, and Jason's own **PR #5** (`1e599c4`) fixed the rest of the queue his own way (O-05, O-06,
+> O-10..O-24 less O-08, O-26, O-27). O-07 is not-a-bug, O-09 was resolved on the fork. The fix
+> branches below for the fixed findings have been **pruned**; only two items remain:
+> `fix/example-pathhost` (O-08, stricter: refuses to peer with a placeholder — upstream only warns)
+> and `fix/peer-password-random` (O-25, the computable peer password — open maintainer decision).
+> Plus a pending GO-2026-6859 Dockerfile Go-toolchain bump. The order table below is kept for the
+> record only. See [ISSUES.md](ISSUES.md) for current status.
+
 Every fix is its own branch on [go-while/OpenUsenetServer](https://github.com/go-while/OpenUsenetServer),
 based on upstream `main` at `abe8543` (except `fix/over-msgid-bytes-on-kab`, which sits on
 `fix/keep-article-bytes` on purpose, see below), with its own tests. This file is the planned order for
